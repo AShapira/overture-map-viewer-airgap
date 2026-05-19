@@ -1,0 +1,294 @@
+name: Airgap CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    tags:
+      - "airgap-v*"
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_OWNER: ashapira
+  VIEWER_IMAGE: ghcr.io/ashapira/overture-explorer-airgap
+  TILES_IMAGE: ghcr.io/ashapira/overture-tiles-airgap
+
+jobs:
+  app:
+    name: App checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+          cache: npm
+
+      - name: Install
+        run: |
+          npm ci --ignore-scripts
+          npm run postinstall
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test -- --runInBand
+
+      - name: Build
+        run: npm run build
+
+      - name: Browser smoke without external calls
+        run: |
+          mkdir -p out/catalog/2026-04-15.0
+          cat > out/catalog/catalog.json <<'JSON'
+          {
+            "type": "Catalog",
+            "id": "airgap-smoke",
+            "links": [
+              {
+                "rel": "child",
+                "href": "/catalog/2026-04-15.0/catalog.json",
+                "title": "2026-04-15.0",
+                "latest": true
+              }
+            ]
+          }
+          JSON
+          cat > out/catalog/2026-04-15.0/catalog.json <<'JSON'
+          {
+            "type": "Catalog",
+            "id": "2026-04-15.0",
+            "links": []
+          }
+          JSON
+          npx playwright install chromium --with-deps
+          npx serve@14.2.4 out --listen 18080 &
+          for i in {1..20}; do
+            if curl -fsS http://127.0.0.1:18080/ >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          node - <<'NODE'
+          const { chromium } = require("playwright");
+
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            const page = await browser.newPage();
+            const externalRequests = [];
+            page.on("request", (request) => {
+              const url = new URL(request.url());
+              if (!["localhost", "127.0.0.1"].includes(url.hostname)) {
+                externalRequests.push(request.url());
+              }
+            });
+            await page.goto("http://localhost:18080/#16/32.072792/34.790891", {
+              waitUntil: "load",
+              timeout: 30000,
+            });
+            await page.waitForTimeout(3000);
+            const enabledButton = await page
+              .getByRole("button", { name: "Download visible layers" })
+              .isDisabled();
+            await browser.close();
+
+            if (externalRequests.length > 0) {
+              throw new Error(`External requests observed: ${externalRequests.join(", ")}`);
+            }
+            if (enabledButton) {
+              throw new Error("Download button should be enabled at zoom 16 with default minZoom 15");
+            }
+          })();
+          NODE
+
+  docker:
+    name: Docker build, scan, and publish
+    runs-on: ubuntu-latest
+    needs: app
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set image tags
+        id: tags
+        shell: bash
+        run: |
+          short_sha="${GITHUB_SHA::7}"
+          viewer_tags="${VIEWER_IMAGE}:sha-${short_sha}"
+          tiles_tags="${TILES_IMAGE}:sha-${short_sha}"
+
+          if [[ "${GITHUB_REF_TYPE}" == "branch" && "${GITHUB_REF_NAME}" == "main" ]]; then
+            viewer_tags="${viewer_tags},${VIEWER_IMAGE}:main"
+            tiles_tags="${tiles_tags},${TILES_IMAGE}:main"
+          fi
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            viewer_tags="${viewer_tags},${VIEWER_IMAGE}:${GITHUB_REF_NAME}"
+            tiles_tags="${tiles_tags},${TILES_IMAGE}:${GITHUB_REF_NAME}"
+          fi
+
+          echo "short_sha=${short_sha}" >> "${GITHUB_OUTPUT}"
+          echo "viewer_tags=${viewer_tags}" >> "${GITHUB_OUTPUT}"
+          echo "tiles_tags=${tiles_tags}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build viewer image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.viewer
+          load: true
+          tags: ${{ steps.tags.outputs.viewer_tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.title=overture-explorer-airgap
+
+      - name: Build tile generator image
+        uses: docker/build-push-action@v6
+        with:
+          context: airgap/tile-generator
+          file: airgap/tile-generator/Dockerfile
+          load: true
+          tags: ${{ steps.tags.outputs.tiles_tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.title=overture-tiles-airgap
+
+      - name: Viewer container hardening smoke test
+        run: |
+          mkdir -p ci-smoke/catalog ci-smoke/tiles/2026-04-15.0 ci-smoke/data/release/2026-04-15.0/theme=places/type=place
+          printf '{"type":"Catalog","id":"smoke","links":[]}\n' > ci-smoke/catalog/catalog.json
+          printf '{}' > ci-smoke/tiles/2026-04-15.0/places.pmtiles
+          printf '{}' > ci-smoke/data/release/2026-04-15.0/theme=places/type=place/filtered.parquet
+
+          docker run -d --rm --name viewer-smoke \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            -p 18081:8080 \
+            --mount type=bind,source="${PWD}/ci-smoke/catalog",target=/usr/share/nginx/html/catalog,readonly \
+            --mount type=bind,source="${PWD}/ci-smoke/tiles",target=/usr/share/nginx/html/tiles,readonly \
+            --mount type=bind,source="${PWD}/ci-smoke/data",target=/usr/share/nginx/html/data,readonly \
+            --tmpfs /tmp \
+            --tmpfs /var/cache/nginx \
+            --tmpfs /var/run \
+            "${VIEWER_IMAGE}:sha-${{ steps.tags.outputs.short_sha }}"
+
+          trap 'docker rm -f viewer-smoke' EXIT
+          for i in {1..20}; do
+            if curl -fsS http://127.0.0.1:18081/ >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18081/config/viewer-config.json >/dev/null
+          curl -fsS http://127.0.0.1:18081/catalog/catalog.json >/dev/null
+          curl -fsS http://127.0.0.1:18081/tiles/2026-04-15.0/places.pmtiles >/dev/null
+          curl -fsS http://127.0.0.1:18081/data/release/2026-04-15.0/theme=places/type=place/filtered.parquet >/dev/null
+
+      - name: Scan viewer image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.VIEWER_IMAGE }}:sha-${{ steps.tags.outputs.short_sha }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Scan tile generator image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.TILES_IMAGE }}:sha-${{ steps.tags.outputs.short_sha }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Generate viewer SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.VIEWER_IMAGE }}:sha-${{ steps.tags.outputs.short_sha }}
+          output-file: sbom-viewer.spdx.json
+
+      - name: Generate tile generator SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.TILES_IMAGE }}:sha-${{ steps.tags.outputs.short_sha }}
+          output-file: sbom-tiles.spdx.json
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sboms
+          path: |
+            sbom-viewer.spdx.json
+            sbom-tiles.spdx.json
+          if-no-files-found: error
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish images
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          IFS=',' read -ra viewer_tags <<< "${{ steps.tags.outputs.viewer_tags }}"
+          for tag in "${viewer_tags[@]}"; do
+            docker push "${tag}"
+          done
+
+          IFS=',' read -ra tiles_tags <<< "${{ steps.tags.outputs.tiles_tags }}"
+          for tag in "${tiles_tags[@]}"; do
+            docker push "${tag}"
+          done
+
+  static-security:
+    name: Static security checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Lint Dockerfiles
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile.viewer
+          failure-threshold: error
+
+      - name: Lint tile generator Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: airgap/tile-generator/Dockerfile
+          failure-threshold: error
+
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
