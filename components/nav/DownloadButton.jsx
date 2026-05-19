@@ -10,14 +10,13 @@ import {
 } from "@geoarrow/geoarrow-wasm/esm/index.js";
 import Tooltip from "@mui/material/Tooltip";
 import IconButton from "@mui/material/IconButton";
+import DownloadForOfflineOutlinedIcon from "@mui/icons-material/DownloadForOfflineOutlined";
 import initWasm from "@geoarrow/geoarrow-wasm/esm/index.js";
 import { getVisibleTypes } from "@/lib/LayerManager";
 import { downloadAsZip } from "@/lib/zipDownload";
 import { buildDownloadMetadata } from "@/lib/downloadMetadata";
 
 const ZOOM_BOUND = 15;
-const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
-
 function DownloadButton({ mode, zoom, setZoom, visibleTypes}) {
   const map = useMapInstance();
 
@@ -184,7 +183,7 @@ function DownloadButton({ mode, zoom, setZoom, visibleTypes}) {
             },
           }}
         >
-          <span className="material-symbols-outlined" style={{ fontSize: 20 }}>download_for_offline</span>
+          <DownloadForOfflineOutlinedIcon fontSize="small" />
         </IconButton>
       </span>
     </Tooltip>

@@ -31,9 +31,6 @@ try {
   // Already set — ignore
 }
 
-// Load PMTiles URLs from STAC catalog at module load time
-const pmtilesPromise = loadPmtilesFromStac();
-
 // All font family names used by the map (must match @font-face declarations in globals.css)
 const fontNames = Object.values(fontsJson).flatMap((variants) =>
   Object.values(variants)
@@ -112,7 +109,7 @@ export default function Map({
 
   // Load PMTiles URLs from STAC catalog
   useEffect(() => {
-    pmtilesPromise
+    loadPmtilesFromStac()
       .then((urls) => {
         const urlsObj = Object.fromEntries(urls);
         setPmtilesUrls(urlsObj);

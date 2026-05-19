@@ -11,6 +11,7 @@
 jest.mock('stac-js', () => ({ __esModule: true, default: (data) => data }));
 
 const CACHE_KEY = 'overture-stac-cache';
+const CONFIG_URL = '/config/viewer-config.json';
 const ROOT_URL = 'https://stac.overturemaps.org/catalog.json';
 const RELEASE_URL = 'https://stac.overturemaps.org/releases/2024-09-18/catalog.json';
 const PMTILES_URL = 'https://example.com/2024-09-18/base.pmtiles';
@@ -22,6 +23,15 @@ const THEME_CATALOG = { id: 'base', links: [{ rel: 'pmtiles', href: PMTILES_URL 
 
 function mockFetchSuccess() {
   global.fetch = jest.fn((url) => {
+    if (url === CONFIG_URL) {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          stacCatalogUrl: ROOT_URL,
+          downloadBaseUrl: '/data/release/2026-04-15.0/',
+        }),
+      });
+    }
     const data = url === ROOT_URL ? ROOT_CATALOG : url === RELEASE_URL ? RELEASE_CATALOG : THEME_CATALOG;
     return Promise.resolve({ ok: true, json: () => Promise.resolve(data) });
   });
@@ -41,7 +51,7 @@ describe('stacService', () => {
 
   it('cache miss: fetches all 3 catalogs and writes localStorage', async () => {
     const urls = await loadPmtilesFromStac();
-    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(global.fetch).toHaveBeenCalledTimes(4);
     expect(urls.get('base')).toBe(PMTILES_URL);
     expect(JSON.parse(localStorage.getItem(CACHE_KEY))).toMatchObject({
       releaseUrl: RELEASE_URL,
@@ -55,7 +65,7 @@ describe('stacService', () => {
       releaseUrl: RELEASE_URL, releaseId: '2024-09-18', pmtilesUrls: { base: PMTILES_URL },
     }));
     const urls = await loadPmtilesFromStac();
-    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
     expect(urls.get('base')).toBe(PMTILES_URL);
   });
 
@@ -66,7 +76,7 @@ describe('stacService', () => {
       pmtilesUrls: { base: 'https://example.com/old.pmtiles' },
     }));
     const urls = await loadPmtilesFromStac();
-    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(global.fetch).toHaveBeenCalledTimes(4);
     expect(urls.get('base')).toBe(PMTILES_URL);
   });
 
@@ -74,14 +84,14 @@ describe('stacService', () => {
     jest.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('SecurityError'); });
     jest.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('SecurityError'); });
     const urls = await loadPmtilesFromStac();
-    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(global.fetch).toHaveBeenCalledTimes(4);
     expect(urls.get('base')).toBe(PMTILES_URL);
   });
 
   it('corrupt localStorage JSON: falls through to full waterfall and overwrites bad entry', async () => {
     localStorage.setItem(CACHE_KEY, 'not valid json {{{{');
     await loadPmtilesFromStac();
-    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(global.fetch).toHaveBeenCalledTimes(4);
     expect(JSON.parse(localStorage.getItem(CACHE_KEY)).releaseId).toBe('2024-09-18');
   });
 
@@ -99,18 +109,26 @@ describe('stacService', () => {
     const urls = await loadPmtilesFromStac();
 
     expect(removeSpy).toHaveBeenCalledWith(CACHE_KEY);
-    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(global.fetch).toHaveBeenCalledTimes(4);
     expect(urls.get('base')).toBe(PMTILES_URL);
   });
 
   it('in-memory session cache: second call within same session does not re-fetch', async () => {
     await loadPmtilesFromStac();
     await loadPmtilesFromStac();
-    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(global.fetch).toHaveBeenCalledTimes(4);
   });
 
   it('failed promise is cleared so the next call retries successfully', async () => {
-    global.fetch = jest.fn().mockRejectedValue(new Error('network error'));
+    global.fetch = jest.fn((url) => {
+      if (url === CONFIG_URL) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ stacCatalogUrl: ROOT_URL }),
+        });
+      }
+      return Promise.reject(new Error('network error'));
+    });
     await expect(loadPmtilesFromStac()).rejects.toThrow('network error');
     mockFetchSuccess();
     const urls = await loadPmtilesFromStac();

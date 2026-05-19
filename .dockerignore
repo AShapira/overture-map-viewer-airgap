@@ -1,0 +1,9 @@
+.git
+.github
+node_modules
+.next
+out
+airgap-output
+data
+*.log
+*.tmp

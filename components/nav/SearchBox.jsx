@@ -13,9 +13,9 @@ import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
 import ClickAwayListener from "@mui/material/ClickAwayListener";
 import { useMapInstance } from "@/lib/MapContext";
+import ManageSearchOutlinedIcon from "@mui/icons-material/ManageSearchOutlined";
+import { getViewerConfig } from "@/lib/viewerConfig";
 import PropTypes from "prop-types";
-
-const GEOCODER_BASE = "https://geocoder.bradr.dev";
 
 const TYPE_LABELS = {
   locality: "City",
@@ -46,6 +46,8 @@ export default function SearchBox({ mode, onGersSelect }) {
   const [open, setOpen] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const [searchMode, setSearchMode] = useState("locality");
+  const [geocoderBaseUrl, setGeocoderBaseUrl] = useState(null);
+  const [searchEnabled, setSearchEnabled] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState(null);
   const menuOpen = Boolean(menuAnchor);
   const debounceRef = useRef(null);
@@ -62,6 +64,12 @@ export default function SearchBox({ mode, onGersSelect }) {
       setNotFound(false);
       return;
     }
+    if (!searchEnabled || !geocoderBaseUrl) {
+      setResults([]);
+      setOpen(true);
+      setNotFound(true);
+      return;
+    }
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -69,7 +77,7 @@ export default function SearchBox({ mode, onGersSelect }) {
     try {
       if (sMode === "gers") {
         const res = await fetch(
-          `${GEOCODER_BASE}/id/${encodeURIComponent(q.trim())}`,
+          `${geocoderBaseUrl}/id/${encodeURIComponent(q.trim())}`,
           { signal: controller.signal }
         );
         if (!res.ok) {
@@ -90,7 +98,7 @@ export default function SearchBox({ mode, onGersSelect }) {
         }
       } else {
         const res = await fetch(
-          `${GEOCODER_BASE}/search?q=${encodeURIComponent(q)}&limit=6&autocomplete=true`,
+          `${geocoderBaseUrl}/search?q=${encodeURIComponent(q)}&limit=6&autocomplete=true`,
           { signal: controller.signal }
         );
         const data = await res.json();
@@ -107,7 +115,7 @@ export default function SearchBox({ mode, onGersSelect }) {
         console.error("Geocoder search failed:", err);
       }
     }
-  }, []);
+  }, [geocoderBaseUrl, searchEnabled]);
 
   const handleInput = (e) => {
     const val = e.target.value;
@@ -175,6 +183,14 @@ export default function SearchBox({ mode, onGersSelect }) {
   };
 
   useEffect(() => {
+    getViewerConfig().then((config) => {
+      const base = typeof config.geocoderBaseUrl === "string"
+        ? config.geocoderBaseUrl.replace(/\/$/, "")
+        : null;
+      setGeocoderBaseUrl(base);
+      setSearchEnabled(Boolean(config.features?.search && base));
+    });
+
     return () => {
       clearTimeout(debounceRef.current);
       if (abortRef.current) abortRef.current.abort();
@@ -241,16 +257,16 @@ export default function SearchBox({ mode, onGersSelect }) {
           }}
         >
           <span
-            className="material-symbols-outlined"
-            style={{ fontSize: 18, opacity: 0.5, marginRight: 6 }}
+            style={{ opacity: 0.5, marginRight: 6, display: "flex" }}
           >
-            find_replace
+            <ManageSearchOutlinedIcon sx={{ fontSize: 18 }} />
           </span>
           <InputBase
-            placeholder={PLACEHOLDER[searchMode]}
+            placeholder={searchEnabled ? PLACEHOLDER[searchMode] : "Search disabled offline"}
             value={query}
             onChange={handleInput}
             onFocus={() => results.length > 0 && setOpen(true)}
+            disabled={!searchEnabled}
             onKeyDown={handleKeyDown}
             sx={{
               fontSize: 14,
@@ -288,7 +304,7 @@ export default function SearchBox({ mode, onGersSelect }) {
                   fontStyle: "italic",
                 }}
               >
-                No results found
+                {searchEnabled ? "No results found" : "Search is disabled in this offline configuration"}
               </Typography>
             ) : (
               <List dense disablePadding>

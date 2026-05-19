@@ -16,7 +16,8 @@
     "test": "jest",
     "test:ci": "jest --ci --passWithNoTests",
     "test:a11y": "node --test --test-reporter=spec __tests__/a11y.test.mjs",
-    "preview": "npx serve out"
+    "preview": "npx serve out",
+    "airgap:catalog:israel": "node scripts/generate-airgap-catalog.mjs --release 2026-04-15.0 --tiles-dir airgap-output/tiles/2026-04-15.0 --data-dir airgap-output/data/release/2026-04-15.0 --out-dir airgap-output/catalog --bbox 34.17,29.45,35.91,33.38 --tile-base /tiles/2026-04-15.0/"
   },
   "dependencies": {
     "@emotion/react": "^11.11.4",

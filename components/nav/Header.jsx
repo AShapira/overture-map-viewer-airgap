@@ -10,6 +10,10 @@ import LanguageSwitcher from "@/components/nav/LanguageSwitcher";
 import ShareButton from "@/components/nav/ShareButton";
 import GithubButton from "@/components/nav/GithubButton";
 import SearchBox from "@/components/nav/SearchBox";
+import ArticleOutlinedIcon from "@mui/icons-material/ArticleOutlined";
+import BugReportOutlinedIcon from "@mui/icons-material/BugReportOutlined";
+import FrameInspectOutlinedIcon from "@mui/icons-material/FindInPageOutlined";
+import PublicOutlinedIcon from "@mui/icons-material/PublicOutlined";
 import PropTypes from "prop-types";
 
 export default function Header({ zoom, mode, setMode, setZoom, visibleTypes, language, setLanguage, inspectMode, setInspectMode, globeMode, setGlobeMode, activeFeature, onGersSelect }) {
@@ -37,7 +41,7 @@ export default function Header({ zoom, mode, setMode, setZoom, visibleTypes, lan
             aria-label="Documentation"
             sx={{ color: "inherit" }}
           >
-            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>docs</span>
+            <ArticleOutlinedIcon fontSize="small" />
           </IconButton>
         </Tooltip>
         <DownloadButton zoom={zoom} mode={mode} setZoom={setZoom} visibleTypes={visibleTypes} />
@@ -50,7 +54,7 @@ export default function Header({ zoom, mode, setMode, setZoom, visibleTypes, lan
             aria-label="Report a bug"
             sx={{ color: "inherit" }}
           >
-            <span className="material-symbols-outlined" style={{ fontSize: 24 }}>bug_report</span>
+            <BugReportOutlinedIcon fontSize="small" />
           </IconButton>
         </Tooltip>
         <Tooltip title="Toggle inspect mode">
@@ -65,7 +69,7 @@ export default function Header({ zoom, mode, setMode, setZoom, visibleTypes, lan
               },
             }}
           >
-            <span className="material-symbols-outlined" style={{ fontSize: 24 }}>frame_inspect</span>
+            <FrameInspectOutlinedIcon fontSize="small" />
           </IconButton>
         </Tooltip>
         <Tooltip title="Toggle globe view">
@@ -82,7 +86,7 @@ export default function Header({ zoom, mode, setMode, setZoom, visibleTypes, lan
                 },
               }}
             >
-              <span className="material-symbols-outlined" style={{ fontSize: 24 }}>globe_asia</span>
+              <PublicOutlinedIcon fontSize="small" />
             </IconButton>
           </span>
         </Tooltip>

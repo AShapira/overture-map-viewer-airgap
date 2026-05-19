@@ -1,0 +1,11 @@
+{
+  "stacCatalogUrl": "/catalog/catalog.json",
+  "downloadBaseUrl": "/data/release/2026-04-15.0/",
+  "releaseId": "2026-04-15.0",
+  "geocoderBaseUrl": null,
+  "features": {
+    "search": false,
+    "download": true,
+    "externalDocs": false
+  }
+}
