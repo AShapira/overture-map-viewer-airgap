@@ -30,6 +30,7 @@ The viewer no longer requires public STAC, public Overture S3, Google Fonts, or 
 ### Tile generator image
 
 `airgap/tile-generator/Dockerfile` packages the upstream Overture Planetiler profiles with DuckDB and `s5cmd`.
+It uses a current Ubuntu-based JRE image, builds `s5cmd` from source with a current Go toolchain, and patches the shaded `io.airlift:aircompressor` classes in `planetiler.jar` to the fixed version until Planetiler ships that dependency upstream.
 
 Input modes:
 
