@@ -150,7 +150,7 @@ jobs:
           echo "tiles_tags=${tiles_tags}" >> "${GITHUB_OUTPUT}"
 
       - name: Build viewer image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.viewer
@@ -162,7 +162,7 @@ jobs:
             org.opencontainers.image.title=overture-explorer-airgap
 
       - name: Build tile generator image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: airgap/tile-generator
           file: airgap/tile-generator/Dockerfile
