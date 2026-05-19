@@ -209,7 +209,7 @@ jobs:
           curl -fsS http://127.0.0.1:18081/data/release/2026-04-15.0/theme=places/type=place/filtered.parquet >/dev/null
 
       - name: Scan viewer image
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.VIEWER_IMAGE }}:sha-${{ steps.tags.outputs.short_sha }}
           severity: HIGH,CRITICAL
@@ -217,7 +217,7 @@ jobs:
           exit-code: "1"
 
       - name: Scan tile generator image
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.TILES_IMAGE }}:sha-${{ steps.tags.outputs.short_sha }}
           severity: HIGH,CRITICAL
