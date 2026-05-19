@@ -205,6 +205,7 @@ export default function SearchBox({ mode, onGersSelect }) {
           aria-controls={menuOpen ? "search-type-menu" : undefined}
           aria-haspopup="true"
           aria-expanded={menuOpen ? "true" : undefined}
+          disabled={!searchEnabled}
           size="small"
           sx={{
             color: "inherit",
@@ -213,6 +214,9 @@ export default function SearchBox({ mode, onGersSelect }) {
             padding: "4px 10px",
             minWidth: "auto",
             whiteSpace: "nowrap",
+            "&.Mui-disabled": {
+              color: isDark ? "rgba(255,255,255,0.26)" : "rgba(0,0,0,0.26)",
+            },
           }}
         >
           {buttonLabel}

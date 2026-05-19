@@ -33,29 +33,39 @@ export default function Header({ zoom, mode, setMode, setZoom, visibleTypes, lan
         <OvertureWordmark />
         <Box sx={{ flexGrow: 1 }} />
         <GithubButton mode={mode} />
-        <Tooltip title="Documentation">
+        <Tooltip title="Documentation disabled offline">
+          <span>
           <IconButton
-            href="https://docs.overturemaps.org/"
-            target="_blank"
-            rel="noopener noreferrer"
+            disabled
             aria-label="Documentation"
-            sx={{ color: "inherit" }}
+            sx={{
+              color: "inherit",
+              "&.Mui-disabled": {
+                color: isDark ? "rgba(255,255,255,0.26)" : "rgba(0,0,0,0.26)",
+              },
+            }}
           >
             <ArticleOutlinedIcon fontSize="small" />
           </IconButton>
+          </span>
         </Tooltip>
         <DownloadButton zoom={zoom} mode={mode} setZoom={setZoom} visibleTypes={visibleTypes} />
         <ShareButton visibleTypes={visibleTypes} inspectMode={inspectMode} activeFeature={activeFeature} />
-        <Tooltip title="Report a bug">
+        <Tooltip title="Report a bug disabled offline">
+          <span>
           <IconButton
-            href="https://github.com/OvertureMaps/explore-site/issues/new/choose"
-            target="_blank"
-            rel="noopener noreferrer"
+            disabled
             aria-label="Report a bug"
-            sx={{ color: "inherit" }}
+            sx={{
+              color: "inherit",
+              "&.Mui-disabled": {
+                color: isDark ? "rgba(255,255,255,0.26)" : "rgba(0,0,0,0.26)",
+              },
+            }}
           >
             <BugReportOutlinedIcon fontSize="small" />
           </IconButton>
+          </span>
         </Tooltip>
         <Tooltip title="Toggle inspect mode">
           <IconButton
