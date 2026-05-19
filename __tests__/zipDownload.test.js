@@ -175,6 +175,24 @@ describe("triggerBrowserDownload", () => {
     expect(revokeObjectURLSpy).toHaveBeenCalledWith("blob:mock-url");
   });
 
+  it("can keep the Blob URL alive for a visible fallback link", () => {
+    const download = triggerBrowserDownload(new Uint8Array([1]), "f.zip", {
+      autoRevoke: false,
+    });
+
+    expect(download).toMatchObject({
+      url: "blob:mock-url",
+      filename: "f.zip",
+    });
+    expect(download.blob).toBeInstanceOf(Blob);
+
+    jest.runAllTimers();
+    expect(revokeObjectURLSpy).not.toHaveBeenCalled();
+
+    download.revoke();
+    expect(revokeObjectURLSpy).toHaveBeenCalledWith("blob:mock-url");
+  });
+
   it("passes a Blob through without re-wrapping", () => {
     const blob = new Blob(["hello"], { type: "text/plain" });
     triggerBrowserDownload(blob, "hello.txt");
@@ -250,9 +268,13 @@ describe("downloadAsZip", () => {
       { name: "places.geojson", data: '{"type":"FeatureCollection"}' },
     ];
 
-    downloadAsZip(files, "overture-bundle.zip");
+    const download = downloadAsZip(files, "overture-bundle.zip");
 
     expect(clickSpy).toHaveBeenCalledTimes(1);
+    expect(download).toMatchObject({
+      url: "blob:mock-url",
+      filename: "overture-bundle.zip",
+    });
 
     // Verify the blob handed to createObjectURL is a real ZIP we can read back
     const blob = createObjectURLSpy.mock.calls[0][0];

@@ -1,6 +1,6 @@
 import PropTypes from "prop-types";
 import { useMapInstance } from "@/lib/MapContext";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getDownloadCatalog } from "@/lib/DownloadCatalog";
 import { getLatestReleaseVersion } from "@/lib/stacService";
 import {
@@ -21,6 +21,24 @@ function DownloadButton({ mode, zoom, setZoom, visibleTypes}) {
   const map = useMapInstance();
 
   const [loading, setLoading] = useState(false);
+  const [readyDownload, setReadyDownload] = useState(null);
+  const readyDownloadRef = useRef(null);
+
+  const replaceReadyDownload = (download) => {
+    if (readyDownloadRef.current?.revoke) {
+      readyDownloadRef.current.revoke();
+    }
+    readyDownloadRef.current = download;
+    setReadyDownload(download);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (readyDownloadRef.current?.revoke) {
+        readyDownloadRef.current.revoke();
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (map) {
@@ -133,7 +151,9 @@ function DownloadButton({ mode, zoom, setZoom, visibleTypes}) {
         });
 
         const archiveName = `overture-${releaseVersion}-${bboxStr}.zip`;
-        downloadAsZip(files, archiveName);
+        replaceReadyDownload(
+          downloadAsZip(files, archiveName, { autoRevoke: false })
+        );
       } catch (error) {
         // Something went wrong with the download.
         console.error("An error occurred during the download:", error);
@@ -189,7 +209,25 @@ function DownloadButton({ mode, zoom, setZoom, visibleTypes}) {
     </Tooltip>
   );
 
-  return downloadIcon;
+  return (
+    <>
+      {downloadIcon}
+      {readyDownload && (
+        <div className="download-ready-link" role="status">
+          <a href={readyDownload.url} download={readyDownload.filename}>
+            Download ready: {readyDownload.filename}
+          </a>
+          <button
+            type="button"
+            aria-label="Dismiss download link"
+            onClick={() => replaceReadyDownload(null)}
+          >
+            x
+          </button>
+        </div>
+      )}
+    </>
+  );
 }
 
 DownloadButton.propTypes = {

@@ -1,3 +1,46 @@
+.download-ready-link {
+  position: fixed;
+  top: 76px;
+  right: 16px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 8px 10px;
+  border: 1px solid rgb(35 83 140 / 35%);
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 4px 18px rgb(0 0 0 / 18%);
+  color: #12345f;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.download-ready-link a {
+  overflow-wrap: anywhere;
+  color: #12345f;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.download-ready-link button {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #12345f;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.download-ready-link button:hover {
+  background: rgb(18 52 95 / 10%);
+}
+
 .custom-controls {
   position: fixed;
   z-index: 10;
