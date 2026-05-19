@@ -278,13 +278,13 @@ jobs:
           persist-credentials: false
 
       - name: Lint Dockerfiles
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@v3.3.0
         with:
           dockerfile: Dockerfile.viewer
           failure-threshold: error
 
       - name: Lint tile generator Dockerfile
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@v3.3.0
         with:
           dockerfile: airgap/tile-generator/Dockerfile
           failure-threshold: error
