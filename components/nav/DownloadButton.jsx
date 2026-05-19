@@ -3,6 +3,7 @@ import { useMapInstance } from "@/lib/MapContext";
 import { useEffect, useRef, useState } from "react";
 import { getDownloadCatalog } from "@/lib/DownloadCatalog";
 import { getLatestReleaseVersion } from "@/lib/stacService";
+import { getViewerConfig } from "@/lib/viewerConfig";
 import {
   ParquetDataset,
   set_panic_hook,
@@ -16,12 +17,13 @@ import { getVisibleTypes } from "@/lib/LayerManager";
 import { downloadAsZip } from "@/lib/zipDownload";
 import { buildDownloadMetadata } from "@/lib/downloadMetadata";
 
-const ZOOM_BOUND = 15;
+const DEFAULT_MIN_ZOOM = 15;
 function DownloadButton({ mode, zoom, setZoom, visibleTypes}) {
   const map = useMapInstance();
 
   const [loading, setLoading] = useState(false);
   const [readyDownload, setReadyDownload] = useState(null);
+  const [downloadMinZoom, setDownloadMinZoom] = useState(DEFAULT_MIN_ZOOM);
   const readyDownloadRef = useRef(null);
 
   const replaceReadyDownload = (download) => {
@@ -33,6 +35,10 @@ function DownloadButton({ mode, zoom, setZoom, visibleTypes}) {
   };
 
   useEffect(() => {
+    getViewerConfig().then((config) => {
+      setDownloadMinZoom(config.download?.minZoom ?? DEFAULT_MIN_ZOOM);
+    });
+
     return () => {
       if (readyDownloadRef.current?.revoke) {
         readyDownloadRef.current.revoke();
@@ -167,23 +173,14 @@ function DownloadButton({ mode, zoom, setZoom, visibleTypes}) {
     }
   };
 
-  const isDisabled = loading || zoom < ZOOM_BOUND;
+  const isDisabled = loading || zoom < downloadMinZoom;
 
   const downloadIcon = (
     <Tooltip
       title={
-        zoom < ZOOM_BOUND ? (
+        zoom < downloadMinZoom ? (
           <span>
-            Download is disabled below zoom {ZOOM_BOUND}. Zoom in to enable. For larger areas, use{" "}
-            <a
-              href="https://github.com/OvertureMaps/overturemaps-py"
-              target="_blank"
-              rel="noreferrer noopener"
-              style={{ color: "#90caf9" }}
-            >
-              overturemaps-py
-            </a>
-            .
+            Download is disabled below zoom {downloadMinZoom}. Zoom in to enable.
           </span>
         ) : loading ? "Downloading..." : "Download visible layers"
       }

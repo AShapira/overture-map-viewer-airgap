@@ -72,9 +72,16 @@ Default offline config:
     "search": false,
     "download": true,
     "externalDocs": false
+  },
+  "download": {
+    "minZoom": 15
   }
 }
 ```
+
+Change `download.minZoom` in the mounted config to control when the
+`Download visible layers` button is enabled. Lower values allow larger visible
+areas; higher values restrict downloads to smaller visible areas.
 
 ## Docs
 

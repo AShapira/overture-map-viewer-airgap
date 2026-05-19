@@ -23,6 +23,7 @@ Runtime properties:
 - dropped Linux capabilities in Compose
 - static files only
 - runtime config from `/config/viewer-config.json`
+- configurable download zoom gate via `download.minZoom`
 
 The viewer no longer requires public STAC, public Overture S3, Google Fonts, or the public geocoder. Search is disabled unless an internal geocoder URL is configured.
 
