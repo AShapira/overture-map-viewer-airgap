@@ -14,6 +14,7 @@ ARG PLANETILER_VERSION=0.10.2
 
 LABEL org.opencontainers.image.title="overture-tiles-airgap"
 
+# hadolint ignore=DL3003,DL3008
 RUN mkdir -p /app && \
     apt-get update && \
     apt-get upgrade -y && \
