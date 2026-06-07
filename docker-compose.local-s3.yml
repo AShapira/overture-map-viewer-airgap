@@ -1,0 +1,74 @@
+services:
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+
+  s3-seed:
+    image: overture-tiles-airgap:local
+    depends_on:
+      - minio
+    entrypoint: bash
+    command:
+      - -c
+      - |
+        set -eu
+        until s5cmd mb s3://overture-local >/tmp/s5cmd-mb.log 2>&1; do
+          grep -q "BucketAlreadyOwnedByYou" /tmp/s5cmd-mb.log && break
+          cat /tmp/s5cmd-mb.log >&2
+          sleep 2
+        done
+        duckdb -c "COPY (SELECT * EXCLUDE (filename) FROM read_parquet('/seed/filtered.parquet')) TO '/tmp/filtered.parquet';" \
+          || cp /seed/filtered.parquet /tmp/filtered.parquet
+        s5cmd cp /tmp/filtered.parquet s3://overture-local/release/2026-04-15.0/theme=places/type=place/filtered.parquet
+        s5cmd head s3://overture-local/release/2026-04-15.0/theme=places/type=place/filtered.parquet
+    environment:
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_REGION: us-east-1
+      S3_ENDPOINT_URL: http://minio:9000
+    volumes:
+      - ./airgap-output/data/release/2026-04-15.0/theme=places/type=place/filtered.parquet:/seed/filtered.parquet:ro
+
+  s3-key-check:
+    image: overture-tiles-airgap:local
+    depends_on:
+      - minio
+    entrypoint: s5cmd
+    command:
+      - head
+      - s3://overture-local/release/2026-04-15.0/theme=places/type=place/filtered.parquet
+    environment:
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_REGION: us-east-1
+      S3_ENDPOINT_URL: http://minio:9000
+
+  tiles-israel-places-s3:
+    image: overture-tiles-airgap:local
+    depends_on:
+      - minio
+    environment:
+      RELEASE: "2026-04-15.0"
+      THEME: "places"
+      BBOX: "34.17,29.45,35.91,33.38"
+      SOURCE_PATH: "s3://overture-local/release/2026-04-15.0"
+      OUTPUT: "/output"
+      PRESERVE_PARQUET: "true"
+      S3_REGION: "us-east-1"
+      AWS_ACCESS_KEY_ID: "minioadmin"
+      AWS_SECRET_ACCESS_KEY: "minioadmin"
+      AWS_REGION: "us-east-1"
+      S3_ENDPOINT_URL: "http://minio:9000"
+    volumes:
+      - ./airgap-output/s3-smoke:/output
+
+volumes:
+  minio-data:

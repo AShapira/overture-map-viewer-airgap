@@ -37,6 +37,26 @@ Input modes:
 - mounted filesystem release, for example `/input/release/theme=places/type=place/*.parquet`
 - S3-compatible source using `SOURCE_PATH=s3://bucket/path`
 
+For S3-compatible input, object keys under the bucket path must preserve the
+release layout expected by the generator:
+
+```text
+theme=<theme>/type=<type>/<file>.parquet
+```
+
+The local S3 smoke test uses MinIO and verifies this exact key before running
+the generator:
+
+```text
+s3://overture-local/release/2026-04-15.0/theme=places/type=place/filtered.parquet
+```
+
+Run it with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\test-local-s3-generator.ps1
+```
+
 Output layout:
 
 ```text

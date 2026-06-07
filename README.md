@@ -40,6 +40,46 @@ node .\scripts\generate-airgap-catalog.mjs `
   --tile-base /tiles/2026-04-15.0/
 ```
 
+## Test Local S3 Input
+
+The tile generator can read release data from an S3-compatible source with:
+
+```text
+SOURCE_PATH=s3://bucket/prefix
+```
+
+For local testing, use the MinIO smoke workflow:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\test-local-s3-generator.ps1
+```
+
+The script seeds this exact object key into the `overture-local` bucket and
+verifies it is accessible before running the generator:
+
+```text
+release/2026-04-15.0/theme=places/type=place/filtered.parquet
+```
+
+The S3 key layout must match the mounted release layout:
+
+```text
+<prefix>/theme=<theme>/type=<type>/<file>.parquet
+```
+
+The smoke output is written to:
+
+```text
+airgap-output/s3-smoke/
+```
+
+To validate the full air-gapped S3 runbook flow, including source S3, generated
+output S3, catalog generation, viewer sync, viewer startup, and HTTP probes:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\validate-airgap-s3-runbook.ps1
+```
+
 ## Run Viewer
 
 ```powershell
@@ -134,4 +174,5 @@ read-optimized storage, and monitor pod egress, storage read throughput,
 ## Docs
 
 - [Airgap design](docs/airgap-design.md)
+- [Air-gapped S3 runbook](docs/airgap-s3-runbook.md)
 - [GitHub and CI/CD](docs/github-cicd.md)
