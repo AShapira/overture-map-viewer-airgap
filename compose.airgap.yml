@@ -1,16 +1,13 @@
 services:
   viewer:
-    image: overture-explorer-airgap:local
-    build:
-      context: .
-      dockerfile: Dockerfile.viewer
+    image: localhost/overture-explorer-airgap:local
     read_only: true
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
     ports:
-      - "8088:8080"
+      - "${VIEWER_PORT:-8088}:8080"
     volumes:
       - ./airgap-output/catalog:/usr/share/nginx/html/catalog:ro
       - ./airgap-output/tiles:/usr/share/nginx/html/tiles:ro
@@ -21,18 +18,16 @@ services:
       - /var/cache/nginx
       - /var/run
 
-  tiles-israel-places:
-    image: overture-tiles-airgap:local
-    build:
-      context: ./airgap/tile-generator
+  tiles-smoke-places:
+    image: localhost/overture-tiles-airgap:local
     profiles: ["generate"]
     environment:
       RELEASE: "2026-04-15.0"
       THEME: "places"
-      BBOX: "34.17,29.45,35.91,33.38"
+      BBOX: "${BBOX:-}"
       SOURCE_PATH: "/input/release"
       OUTPUT: "/output"
       PRESERVE_PARQUET: "true"
     volumes:
-      - D:/data/overturemaps-us-west-2/release/2026-04-15.0:/input/release:ro
+      - ${OVERTURE_RELEASE_DIR:-./data/release/2026-04-15.0}:/input/release:ro
       - ./airgap-output:/output

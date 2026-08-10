@@ -27,7 +27,10 @@ Recommended release tags:
 
 ## CI/CD Flow
 
-The airgap workflow lives in `.github/workflows/airgap-ci.yml`.
+The airgap workflow lives in `.github/workflows/airgap-ci.yml`. It intentionally
+uses Docker tooling on GitHub-hosted Ubuntu runners for Buildx, scanning, and
+GHCR publishing. This is CI-only; local and air-gap operators use rootless
+Podman on RHEL.
 
 Pull requests to `main` run:
 
@@ -89,7 +92,7 @@ The CI workflow applies these gates before publishing images:
 
 Import upstream Overture changes through a branch and pull request:
 
-```powershell
+```bash
 git fetch upstream
 git switch -c upstream-sync/YYYY-MM-DD
 git merge upstream/main
@@ -97,7 +100,7 @@ git merge upstream/main
 
 Resolve conflicts, run local checks, then push the sync branch:
 
-```powershell
+```bash
 git push -u origin upstream-sync/YYYY-MM-DD
 ```
 

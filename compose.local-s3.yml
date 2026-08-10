@@ -1,6 +1,6 @@
 services:
   minio:
-    image: minio/minio:latest
+    image: docker.io/minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -12,7 +12,7 @@ services:
       - minio-data:/data
 
   s3-seed:
-    image: overture-tiles-airgap:local
+    image: localhost/overture-tiles-airgap:local
     depends_on:
       - minio
     entrypoint: bash
@@ -38,7 +38,7 @@ services:
       - ./airgap-output/data/release/2026-04-15.0/theme=places/type=place/filtered.parquet:/seed/filtered.parquet:ro
 
   s3-key-check:
-    image: overture-tiles-airgap:local
+    image: localhost/overture-tiles-airgap:local
     depends_on:
       - minio
     entrypoint: s5cmd
@@ -51,14 +51,14 @@ services:
       AWS_REGION: us-east-1
       S3_ENDPOINT_URL: http://minio:9000
 
-  tiles-israel-places-s3:
-    image: overture-tiles-airgap:local
+  tiles-smoke-places-s3:
+    image: localhost/overture-tiles-airgap:local
     depends_on:
       - minio
     environment:
       RELEASE: "2026-04-15.0"
       THEME: "places"
-      BBOX: "34.17,29.45,35.91,33.38"
+      BBOX: "${BBOX:-}"
       SOURCE_PATH: "s3://overture-local/release/2026-04-15.0"
       OUTPUT: "/output"
       PRESERVE_PARQUET: "true"
@@ -72,3 +72,7 @@ services:
 
 volumes:
   minio-data:
+
+networks:
+  default:
+    name: overture-airgap-s3

@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM node:20-alpine AS build
+FROM docker.io/library/node:20-alpine AS build
 
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -7,7 +7,7 @@ RUN npm ci --ignore-scripts
 COPY . .
 RUN npm run postinstall && npm run build
 
-FROM nginxinc/nginx-unprivileged:stable-alpine AS runtime
+FROM docker.io/nginxinc/nginx-unprivileged:stable-alpine AS runtime
 
 LABEL org.opencontainers.image.title="overture-explorer-airgap"
 

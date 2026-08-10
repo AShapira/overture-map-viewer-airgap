@@ -1,4 +1,6 @@
 *.sh text eol=lf
+.gitattributes text eol=lf
+.dockerignore text eol=lf
 Dockerfile text eol=lf
 Dockerfile.* text eol=lf
 *.yml text eol=lf

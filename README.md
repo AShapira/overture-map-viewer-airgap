@@ -4,41 +4,85 @@ This repository packages the Overture Maps Explorer for a disconnected environme
 
 The important split is:
 
-- `overture-explorer-airgap`: tiny static viewer container
-- `overture-tiles-airgap`: batch tile-generation container
+- `localhost/overture-explorer-airgap:local`: small static viewer container
+- `localhost/overture-tiles-airgap:local`: batch tile-generation container
 
-The local Overture release expected on this machine is:
+Local development and RHEL air-gap operations support rootless Podman on RHEL 10
+under WSL2. A separate production deployment uses imported Artifactory images
+with Docker Desktop on an air-gapped Windows host. The OCI `Dockerfile`s remain
+portable image definitions, and GitHub-hosted CI continues to use Docker tooling.
+
+## Prerequisites
+
+Run all commands inside the RHEL WSL distro as your normal Linux user. The
+validated baseline is Podman 5.8.2, `podman-compose` 1.6.0, Node.js 22, and npm.
+
+```bash
+podman --version
+podman-compose --version
+podman info --format 'rootless={{.Host.Security.Rootless}}'
+node --version
+npm --version
+```
+
+The final command must report `rootless=true`. Do not prefix project commands
+with `sudo`.
+
+Install the lockfile-pinned application dependencies once per clean checkout:
+
+```bash
+npm ci --ignore-scripts
+npm run postinstall
+```
+
+The browser accessibility check also needs Playwright Chromium and its RHEL
+runtime libraries:
+
+```bash
+sudo dnf install -y \
+  alsa-lib atk at-spi2-atk at-spi2-core \
+  libX11 libXcomposite libXdamage libXext libXfixes libXrandr \
+  libxcb mesa-libgbm
+npx playwright install chromium
+```
+
+The default local Overture release path is:
 
 ```text
-D:\data\overturemaps-us-west-2\release\2026-04-15.0
+./data/release/2026-04-15.0
+```
+
+Override it when needed:
+
+```bash
+export OVERTURE_RELEASE_DIR=/path/to/release/2026-04-15.0
 ```
 
 ## Build Images
 
-```powershell
-docker build -f Dockerfile.viewer -t overture-explorer-airgap:local .
-docker build -t overture-tiles-airgap:local .\airgap\tile-generator
+```bash
+./scripts/build-images.sh
 ```
 
-## Generate Israel Smoke Tiles
+The script uses Podman with Docker-format image metadata so the viewer's OCI
+`HEALTHCHECK` instruction is preserved. Compose consumes these prebuilt images.
 
-Generate one theme first:
+## Generate Smoke Tiles
 
-```powershell
-docker compose --profile generate run --rm tiles-israel-places
+Generate one theme from the mounted release:
+
+```bash
+BBOX="min_lon,min_lat,max_lon,max_lat" \
+  podman-compose -f compose.airgap.yml --profile generate run --rm -T tiles-smoke-places
 ```
 
 Generate the local catalog:
 
-```powershell
-node .\scripts\generate-airgap-catalog.mjs `
-  --release 2026-04-15.0 `
-  --tiles-dir .\airgap-output\tiles\2026-04-15.0 `
-  --data-dir .\airgap-output\data\release\2026-04-15.0 `
-  --out-dir .\airgap-output\catalog `
-  --bbox 34.17,29.45,35.91,33.38 `
-  --tile-base /tiles/2026-04-15.0/
+```bash
+npm run airgap:catalog:smoke -- --bbox "$BBOX"
 ```
+
+The output is written under `airgap-output/`.
 
 ## Test Local S3 Input
 
@@ -48,17 +92,16 @@ The tile generator can read release data from an S3-compatible source with:
 SOURCE_PATH=s3://bucket/prefix
 ```
 
-For local testing, use the MinIO smoke workflow:
+After generating the local places smoke output, run the MinIO-backed test:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\test-local-s3-generator.ps1
+```bash
+./scripts/test-local-s3-generator.sh
 ```
 
-The script seeds this exact object key into the `overture-local` bucket and
-verifies it is accessible before running the generator:
+Use `--keep-services` to leave MinIO running. The script seeds and verifies:
 
 ```text
-release/2026-04-15.0/theme=places/type=place/filtered.parquet
+s3://overture-local/release/2026-04-15.0/theme=places/type=place/filtered.parquet
 ```
 
 The S3 key layout must match the mounted release layout:
@@ -67,40 +110,39 @@ The S3 key layout must match the mounted release layout:
 <prefix>/theme=<theme>/type=<type>/<file>.parquet
 ```
 
-The smoke output is written to:
+The smoke output is written to `airgap-output/s3-smoke/`.
 
-```text
-airgap-output/s3-smoke/
+Validate the complete source S3, generated-output S3, catalog, viewer sync, and
+HTTP flow with:
+
+```bash
+./scripts/validate-airgap-s3-runbook.sh
 ```
 
-To validate the full air-gapped S3 runbook flow, including source S3, generated
-output S3, catalog generation, viewer sync, viewer startup, and HTTP probes:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\validate-airgap-s3-runbook.ps1
-```
+Optional arguments are `--viewer-port PORT` and `--keep-services`.
 
 ## Run Viewer
 
-```powershell
-docker compose up -d viewer
+```bash
+podman-compose -f compose.airgap.yml up -d viewer
 ```
 
-Open:
+Open [http://localhost:8088](http://localhost:8088). Stop it with:
 
-```text
-http://localhost:8088
+```bash
+podman-compose -f compose.airgap.yml down
+```
+
+If port 8088 is already in use, select another unprivileged host port:
+
+```bash
+VIEWER_PORT=18088 podman-compose -f compose.airgap.yml up -d viewer
 ```
 
 ## Runtime Config
 
-The viewer reads:
-
-```text
-public/config/viewer-config.json
-```
-
-Default offline config:
+The viewer reads `public/config/viewer-config.json`, mounted at runtime by the
+Compose stack. The default offline config is:
 
 ```json
 {
@@ -119,60 +161,56 @@ Default offline config:
 }
 ```
 
-Change `download.minZoom` in the mounted config to control when the
-`Download visible layers` button is enabled. Lower values allow larger visible
-areas; higher values restrict downloads to smaller visible areas.
+Change `download.minZoom` to control when `Download visible layers` is enabled.
+Lower values allow larger visible areas; higher values restrict downloads to
+smaller visible areas.
+
+## Validation
+
+Run the complete static suite with:
+
+```bash
+./scripts/test-static.sh
+```
+
+It validates Bash and Compose syntax, rejects unsupported Windows/Docker local
+tooling, and runs lint, Jest, the static build, and browser accessibility checks.
+
+## RHEL and WSL Notes
+
+- Keep the checkout in the RHEL filesystem and use RHEL-local Git and GitHub CLI.
+- Ports `8088`, `8099`, `9000`, and `9001` are unprivileged and work rootlessly.
+- SELinux is disabled in the supported WSL environment, so `/mnt/d` bind mounts
+  do not use relabel options.
+- On native RHEL with enforcing SELinux, copy operational data to a Linux
+  filesystem and add an appropriate `:z` or `:Z` label after reviewing whether
+  each mount is shared or private.
+- WSL-mounted Windows storage is convenient for the source dataset but slower
+  than the Linux filesystem for generator scratch and output; keep
+  `airgap-output/` inside the Linux checkout.
 
 ## Capacity Assumptions
 
-The viewer is a static nginx container. CPU and memory are usually not the
-first bottleneck; capacity is mostly limited by pod egress bandwidth, storage
-read throughput, and PMTiles/parquet HTTP range request volume.
+The viewer is a static nginx container. Capacity is mostly limited by pod
+egress bandwidth, storage read throughput, and PMTiles/parquet range requests.
+For a medium deployment, start with 2 vCPU, 4 GiB RAM, 1 Gbps effective network
+throughput, and fast local or PVC-backed storage.
 
-For a medium pod, assume roughly:
+Reasonable starting estimates for a bounded smoke dataset are:
 
-- 2 vCPU
-- 4 GiB RAM
-- 1 Gbps effective network throughput
-- local SSD or fast PVC-backed storage
+- Light browsing: 500–1500 connected sessions
+- Active panning: 100–300 concurrent users
+- Heavy high-zoom panning: 50–100 concurrent users
+- Small visible-layer downloads: 10–25 concurrent downloads
+- Medium visible-layer downloads: 5–10 concurrent downloads
 
-Expected starting capacity for the Israel smoke dataset:
+For shared production deployments, start with at least two viewer replicas,
+use `download.minZoom: 16`, and monitor egress, storage throughput, p95 static
+response time, and `206` range-request rate.
 
-- Light or idle browsing: 500-1500 connected browser sessions
-- Active panning and zooming: 100-300 concurrent users
-- Heavy high-zoom panning: 50-100 concurrent users
-- Small visible-layer downloads: 10-25 concurrent downloads
-- Medium visible-layer downloads: 5-10 concurrent downloads
-- Large downloads or lower `download.minZoom`: 2-5 concurrent downloads
+## Documentation
 
-Use this rule of thumb for download capacity:
-
-```text
-concurrent downloads = available network MB/s / average download server-read MB/s
-```
-
-On a 1 Gbps pod, practical usable throughput is commonly 70-100 MB/s. If each
-active download reads about 10 MB/s, expect about 7-10 smooth concurrent
-downloads before users feel slowdown.
-
-Recommended shared deployment settings:
-
-```json
-"download": {
-  "minZoom": 16
-}
-```
-
-Use `minZoom: 15` to preserve the current default behavior. Use `minZoom: 17`
-when downloads must be restricted to smaller visible areas. Lower values allow
-larger downloads and should be paired with stronger rate limiting.
-
-For production, start with at least two viewer replicas, keep the data on fast
-read-optimized storage, and monitor pod egress, storage read throughput,
-95th-percentile static response time, and `206` range request rate.
-
-## Docs
-
-- [Airgap design](docs/airgap-design.md)
+- [Air-gap design](docs/airgap-design.md)
 - [Air-gapped S3 runbook](docs/airgap-s3-runbook.md)
+- [Windows Docker Desktop air-gap runbook](docs/windows-docker-desktop-airgap.md)
 - [GitHub and CI/CD](docs/github-cicd.md)

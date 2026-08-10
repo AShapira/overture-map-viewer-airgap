@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile:1.7
-FROM golang:1.25.10-alpine3.23 AS s5cmd-builder
+FROM docker.io/library/golang:1.25.10-alpine3.23 AS s5cmd-builder
 
 ARG S5CMD_VERSION=2.3.0
 
 RUN go install "github.com/peak/s5cmd/v2@v${S5CMD_VERSION}"
 
-FROM eclipse-temurin:25-jre-noble
+FROM docker.io/library/eclipse-temurin:25-jdk-noble
 
 ARG TARGETARCH
 ARG AIRCOMPRESSOR_VERSION=2.0.3

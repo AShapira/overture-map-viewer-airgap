@@ -7,3 +7,5 @@ airgap-output
 data
 *.log
 *.tmp
+compose.local-s3.yml
+compose.airgap.yml
