@@ -61,7 +61,8 @@ validation_root="$REPO_ROOT/airgap-output/runbook-validation"
 generator_output="$validation_root/generator-output"
 viewer_root="$validation_root/viewer-data"
 viewer_config="$validation_root/viewer-config.json"
-normalized_seed="$validation_root/part-00000.parquet"
+source_object_name="part-00000.parquet"
+normalized_seed="$validation_root/$source_object_name"
 
 [[ -f "$seed_parquet" ]] || die "Missing seed parquet: $seed_parquet. Generate the local places smoke output first."
 
@@ -139,21 +140,21 @@ podman run --rm \
   --mount "type=bind,source=$validation_root,target=/validation" \
   --entrypoint duckdb \
   "$TILES_IMAGE" \
-  -c "COPY (SELECT * EXCLUDE (filename) FROM read_parquet('/seed/filtered.parquet')) TO '/validation/part-00000.parquet';"
+  -c "COPY (SELECT * EXCLUDE (filename) FROM read_parquet('/seed/filtered.parquet')) TO '/validation/$source_object_name';"
 require_nonempty_file "$normalized_seed"
 
 printf 'Seeding the source GeoParquet bucket...\n'
 run_tile_image \
-  --mount "type=bind,source=$normalized_seed,target=/seed/part-00000.parquet,ro=true" \
+  --mount "type=bind,source=$normalized_seed,target=/seed/$source_object_name,ro=true" \
   --entrypoint bash \
   "$TILES_IMAGE" \
-  -c "set -eu; s5cmd mb s3://overture-source >/dev/null 2>&1 || true; s5cmd cp /seed/part-00000.parquet s3://overture-source/release/$release/theme=places/type=place/part-00000.parquet; s5cmd head s3://overture-source/release/$release/theme=places/type=place/part-00000.parquet"
+  -c "set -eu; s5cmd mb s3://overture-source >/dev/null 2>&1 || true; s5cmd rm 's3://overture-source/*' >/dev/null 2>&1 || true; s5cmd cp /seed/$source_object_name s3://overture-source/release/$release/theme=places/type=place/$source_object_name; s5cmd head s3://overture-source/release/$release/theme=places/type=place/$source_object_name"
 
 printf 'Creating the generated-output bucket...\n'
 run_tile_image \
   --entrypoint bash \
   "$TILES_IMAGE" \
-  -c "s5cmd mb s3://overture-generated >/dev/null 2>&1 || true; s5cmd ls s3://overture-generated >/dev/null"
+  -c "s5cmd mb s3://overture-generated >/dev/null 2>&1 || true; s5cmd rm 's3://overture-generated/*' >/dev/null 2>&1 || true; s5cmd ls s3://overture-generated >/dev/null"
 
 printf 'Generating tiles from the source bucket...\n'
 run_tile_image \
@@ -167,7 +168,7 @@ run_tile_image \
   "$TILES_IMAGE"
 
 require_nonempty_file "$generator_output/tiles/$release/places.pmtiles"
-require_nonempty_file "$generator_output/data/release/$release/theme=places/type=place/filtered.parquet"
+require_nonempty_file "$generator_output/data/release/$release/theme=places/type=place/$source_object_name"
 
 printf 'Generating the local STAC catalog...\n'
 node "$REPO_ROOT/scripts/generate-airgap-catalog.mjs" \
@@ -211,6 +212,7 @@ podman run -d \
   --read-only \
   --cap-drop ALL \
   --security-opt no-new-privileges:true \
+  --health-interval disable \
   -p "$viewer_port:8080" \
   --mount "type=bind,source=$viewer_root/catalog,target=/usr/share/nginx/html/catalog,ro=true" \
   --mount "type=bind,source=$viewer_root/tiles,target=/usr/share/nginx/html/tiles,ro=true" \
@@ -223,6 +225,9 @@ podman run -d \
 
 base_url="http://127.0.0.1:$viewer_port"
 wait_for_http "$base_url/" "validation viewer"
+podman healthcheck run "$viewer_name" >/dev/null
+[[ "$(podman inspect "$viewer_name" --format '{{.State.Health.Status}}')" == "healthy" ]] \
+  || die "Validation viewer image healthcheck did not pass."
 curl -fsS "$base_url/config/viewer-config.json" >/dev/null
 curl -fsS "$base_url/catalog/catalog.json" >/dev/null
 curl -fsS "$base_url/catalog/$release/manifest.geojson" >/dev/null

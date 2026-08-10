@@ -30,9 +30,13 @@ Runtime properties:
 - only nginx runtime paths backed by tmpfs
 - runtime config mounted at `/config/viewer-config.json`
 - configurable download zoom gate through `download.minZoom`
+- synchronized Explore/Inspect split view backed by the same local PMTiles
+- confirmation-before-download with a persistent browser fallback link
 
 The viewer does not require public STAC, public Overture S3, Google Fonts, or a
 public geocoder. Search stays disabled unless an internal geocoder is configured.
+The default URL has no `mode` query parameter and opens at the split position;
+`mode=explore` and `mode=inspect` select the corresponding full-map view.
 
 ### Tile generator image
 
@@ -83,6 +87,11 @@ airgap-output/
 4. Start the read-only viewer container.
 5. The browser reads catalogs, PMTiles, and download parquet from the viewer or
    an internal range-capable HTTP gateway.
+
+The browser renders synchronized Explore and Inspect maps. This can increase
+client GPU and memory use and generate PMTiles requests for both styles, while
+the nginx viewer remains a static range-capable file server. Capacity testing
+must therefore cover representative browser hardware as well as server egress.
 
 A bounded smoke run receives its site-approved BBOX from the operator. Full-world
 generation uses the same image without `BBOX` and should run one theme at a time

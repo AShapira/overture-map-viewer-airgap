@@ -64,12 +64,17 @@ Generated output uses:
 
 ```text
 s3://<output-bucket>/tiles/<release>/<theme>.pmtiles
-s3://<output-bucket>/data/release/<release>/theme=<theme>/type=<type>/filtered.parquet
+s3://<output-bucket>/data/release/<release>/theme=<theme>/type=<type>/<file>.parquet
 s3://<output-bucket>/catalog/catalog.json
 s3://<output-bucket>/catalog/<release>/catalog.json
 s3://<output-bucket>/catalog/<release>/<theme>/catalog.json
 s3://<output-bucket>/catalog/<release>/manifest.geojson
 ```
+
+With `PRESERVE_PARQUET=true`, unfiltered input object names are retained (for
+example, `part-00000.parquet`). BBOX-filtered generation writes
+`filtered.parquet` instead. The generated manifest records the actual relative
+path in either case.
 
 ## 3. Validate Rootless Podman
 

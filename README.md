@@ -165,6 +165,20 @@ Change `download.minZoom` to control when `Download visible layers` is enabled.
 Lower values allow larger visible areas; higher values restrict downloads to
 smaller visible areas.
 
+## Viewer Interaction
+
+The default map is a synchronized split view: Explore styling is on the left
+and Inspect styling is on the right. Drag the divider, or use its arrow buttons,
+to compare the same location. Shared URLs use `mode=explore` or `mode=inspect`
+for the corresponding full-map view; when `mode` is absent, the viewer opens at
+the default split position.
+
+Downloads now open a confirmation dialog before reading local parquet. The
+generated GeoJSON follows `overturemaps-py` conventions: feature IDs are stored
+as top-level GeoJSON IDs, the internal `bbox` property is omitted, and
+single-part multi-geometries are emitted in their single-geometry form. After
+generation, the browser keeps a visible fallback link until it is dismissed.
+
 ## Validation
 
 Run the complete static suite with:
@@ -195,6 +209,11 @@ The viewer is a static nginx container. Capacity is mostly limited by pod
 egress bandwidth, storage read throughput, and PMTiles/parquet range requests.
 For a medium deployment, start with 2 vCPU, 4 GiB RAM, 1 Gbps effective network
 throughput, and fast local or PVC-backed storage.
+
+The split view renders two synchronized MapLibre maps and can request Explore
+and Inspect tiles for the same viewport. Treat its browser GPU/memory use and
+PMTiles request rate as higher than the previous single-map mode, and validate
+capacity with representative clients and data before fixing production limits.
 
 Reasonable starting estimates for a bounded smoke dataset are:
 
