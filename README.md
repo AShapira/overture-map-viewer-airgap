@@ -67,22 +67,36 @@ export OVERTURE_RELEASE_DIR=/path/to/release/2026-04-15.0
 The script uses Podman with Docker-format image metadata so the viewer's OCI
 `HEALTHCHECK` instruction is preserved. Compose consumes these prebuilt images.
 
-## Generate Smoke Tiles
+## Generate and Publish Tiles
 
-Generate one theme from the mounted release:
+Generate every configured theme sequentially from the mounted release, publish
+each completed PMTiles archive to S3, and delete its local scratch copy:
 
 ```bash
+THEMES=places \
 BBOX="min_lon,min_lat,max_lon,max_lat" \
-  podman-compose -f compose.airgap.yml --profile generate run --rm -T tiles-smoke-places
+PMTILES_S3_PATH=s3://overture-generated/pmtiles/release/2026-04-15.0 \
+PMTILES_SCRATCH_DIR="$PWD/airgap-output/scratch" \
+PMTILES_MIN_FREE_GB=1 \
+S3_REGION=us-east-1 \
+S3_ENDPOINT_URL=http://127.0.0.1:9000 \
+AWS_ACCESS_KEY_ID=minioadmin \
+AWS_SECRET_ACCESS_KEY=minioadmin \
+  podman-compose -f compose.airgap.yml --profile generate run --rm -T tiles-generator
 ```
 
-Generate the local catalog:
+`THEMES` defaults to all six supported themes. The generator checks scratch
+capacity before each theme and during Planetiler, uploads and verifies the exact
+S3 object, then removes the local PMTiles file. Generate the catalog from the
+success manifest and the browser-facing S3 HTTP URL:
 
 ```bash
-npm run airgap:catalog:smoke -- --bbox "$BBOX"
+PMTILES_HTTP_BASE=http://127.0.0.1:9000/overture-generated/pmtiles/release/2026-04-15.0/ \
+  npm run airgap:catalog:smoke -- --bbox "$BBOX"
 ```
 
-The output is written under `airgap-output/`.
+Catalogs, optional preserved GeoParquet, and publication state are written under
+`airgap-output/`; PMTiles remain only in S3 after success.
 
 ## Test Local S3 Input
 
@@ -110,10 +124,11 @@ The S3 key layout must match the mounted release layout:
 <prefix>/theme=<theme>/type=<type>/<file>.parquet
 ```
 
-The smoke output is written to `airgap-output/s3-smoke/`.
+The smoke workflow writes its publication manifest and optional preserved
+GeoParquet to `airgap-output/s3-smoke/`, while verified PMTiles remain in MinIO.
 
-Validate the complete source S3, generated-output S3, catalog, viewer sync, and
-HTTP flow with:
+Validate the complete source S3, generated-output S3, publication manifest,
+catalog, remote PMTiles range access, and viewer flow with:
 
 ```bash
 ./scripts/validate-airgap-s3-runbook.sh
