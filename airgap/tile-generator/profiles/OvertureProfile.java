@@ -97,7 +97,7 @@ public class OvertureProfile implements Profile {
                         true, // hive-partitioning
                         fields -> fields.get("id"), // hash the ID field to generate unique long IDs
                         fields -> fields.get("type")) // extract "type={}" from the filename to get layer
-                .overwriteOutput(Path.of("data", theme.name() + ".pmtiles"))
+                .overwriteOutput(args.file("output", "output PMTiles archive", Path.of("data", theme.name() + ".pmtiles")))
                 .run();
     }
 }

@@ -14,7 +14,7 @@ IFS=',' read -r MIN_LON MIN_LAT MAX_LON MAX_LAT <<< "$BBOX"
 
 case $THEME in
   addresses) TYPES="address" ;;
-  base) TYPES="bathymetry infrastructure land land_cover water" ;;
+  base) TYPES="bathymetry infrastructure land land_cover land_use water" ;;
   buildings) TYPES="building building_part" ;;
   divisions) TYPES="division division_area division_boundary" ;;
   places) TYPES="place" ;;

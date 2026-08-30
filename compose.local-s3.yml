@@ -51,15 +51,29 @@ services:
       AWS_REGION: us-east-1
       S3_ENDPOINT_URL: http://minio:9000
 
+  s3-public-read:
+    image: docker.io/minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        mc alias set local http://minio:9000 minioadmin minioadmin
+        mc anonymous set download local/overture-generated/pmtiles
+
   tiles-smoke-places-s3:
     image: localhost/overture-tiles-airgap:local
     depends_on:
       - minio
     environment:
       RELEASE: "2026-04-15.0"
-      THEME: "places"
+      THEMES: "places"
       BBOX: "${BBOX:-}"
       SOURCE_PATH: "s3://overture-local/release/2026-04-15.0"
+      PMTILES_S3_PATH: "s3://overture-local/pmtiles/release/2026-04-15.0"
+      PMTILES_SCRATCH_ROOT: /scratch
+      PMTILES_MIN_FREE_GB: "1"
       OUTPUT: "/output"
       PRESERVE_PARQUET: "true"
       S3_REGION: "us-east-1"
@@ -69,6 +83,7 @@ services:
       S3_ENDPOINT_URL: "http://minio:9000"
     volumes:
       - ./airgap-output/s3-smoke:/output
+      - ./airgap-output/s3-smoke/scratch:/scratch
 
 volumes:
   minio-data:

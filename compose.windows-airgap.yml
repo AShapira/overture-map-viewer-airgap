@@ -8,9 +8,12 @@ services:
       - .env.windows-airgap
     environment:
       RELEASE: "${OVERTURE_RELEASE:?Set OVERTURE_RELEASE}"
-      THEME: "${THEME:-places}"
+      THEMES: "${THEMES:-base,buildings,places,divisions,transportation,addresses}"
       BBOX: "${BBOX:-}"
       SOURCE_PATH: "s3://${S3_BUCKET:?Set S3_BUCKET}/${SOURCE_RELEASE_PREFIX:-release}/${OVERTURE_RELEASE:?Set OVERTURE_RELEASE}"
+      PMTILES_S3_PATH: "s3://${S3_BUCKET:?Set S3_BUCKET}/${PMTILES_RELEASE_PREFIX:-pmtiles/release}/${OVERTURE_RELEASE:?Set OVERTURE_RELEASE}"
+      PMTILES_SCRATCH_ROOT: /scratch
+      PMTILES_MIN_FREE_GB: "${PMTILES_MIN_FREE_GB:?Set PMTILES_MIN_FREE_GB}"
       OUTPUT: /output
       PRESERVE_PARQUET: "${PRESERVE_PARQUET:-true}"
       S3_REGION: "${S3_REGION:?Set S3_REGION}"
@@ -18,35 +21,11 @@ services:
       S3_ENDPOINT_URL: "${S3_ENDPOINT_URL:?Set S3_ENDPOINT_URL}"
       AWS_EC2_METADATA_DISABLED: "true"
     volumes:
-      - tiles_output:/output/tiles
       - parquet_output:/output/data
-    security_opt:
-      - no-new-privileges:true
-
-  publish-pmtiles:
-    image: "${TILES_IMAGE:?Set TILES_IMAGE to the Artifactory tile-generator image}"
-    pull_policy: missing
-    restart: "no"
-    env_file:
-      - .env.windows-airgap
-    environment:
-      RELEASE: "${OVERTURE_RELEASE:?Set OVERTURE_RELEASE}"
-      PMTILES_S3_PATH: "s3://${S3_BUCKET:?Set S3_BUCKET}/${PMTILES_RELEASE_PREFIX:-pmtiles/release}/${OVERTURE_RELEASE:?Set OVERTURE_RELEASE}"
-      S3_REGION: "${S3_REGION:?Set S3_REGION}"
-      AWS_REGION: "${S3_REGION:?Set S3_REGION}"
-      S3_ENDPOINT_URL: "${S3_ENDPOINT_URL:?Set S3_ENDPOINT_URL}"
-      AWS_EC2_METADATA_DISABLED: "true"
-    entrypoint:
-      - /bin/bash
-      - -euc
-    command:
-      - |
-        test -d "/output/tiles/$$RELEASE"
-        test -n "$$(find "/output/tiles/$$RELEASE" -maxdepth 1 -type f -name '*.pmtiles' -print -quit)"
-        s5cmd sync "/output/tiles/$$RELEASE/*" "$${PMTILES_S3_PATH%/}/"
-        s5cmd ls "$${PMTILES_S3_PATH%/}/*.pmtiles"
-    volumes:
-      - tiles_output:/output/tiles:ro
+      - publication_output:/output/publication
+      - type: bind
+        source: "${PMTILES_SCRATCH_DIR:?Set PMTILES_SCRATCH_DIR to a local folder with sufficient capacity}"
+        target: /scratch
     security_opt:
       - no-new-privileges:true
 
@@ -64,9 +43,6 @@ services:
       BBOX: "${BBOX:-}"
       DOWNLOAD_MIN_ZOOM: "${DOWNLOAD_MIN_ZOOM:-15}"
       PMTILES_HTTP_BASE: "${PMTILES_HTTP_BASE:?Set PMTILES_HTTP_BASE to the browser-accessible PMTiles release URL}"
-    depends_on:
-      publish-pmtiles:
-        condition: service_completed_successfully
     entrypoint:
       - /bin/sh
       - -euc
@@ -75,7 +51,7 @@ services:
         if [ -n "$$BBOX" ]; then
           node /app/generate-airgap-catalog.mjs \
             --release "$$RELEASE" \
-            --tiles-dir "/output/tiles/$$RELEASE" \
+            --publication-manifest "/output/publication/$$RELEASE.json" \
             --data-dir "/output/data/release/$$RELEASE" \
             --out-dir /output/catalog \
             --bbox "$$BBOX" \
@@ -83,7 +59,7 @@ services:
         else
           node /app/generate-airgap-catalog.mjs \
             --release "$$RELEASE" \
-            --tiles-dir "/output/tiles/$$RELEASE" \
+            --publication-manifest "/output/publication/$$RELEASE.json" \
             --data-dir "/output/data/release/$$RELEASE" \
             --out-dir /output/catalog \
             --tile-base "$$PMTILES_HTTP_BASE"
@@ -108,8 +84,8 @@ services:
         '
     volumes:
       - ./scripts/generate-airgap-catalog.mjs:/app/generate-airgap-catalog.mjs:ro
-      - tiles_output:/output/tiles:ro
       - parquet_output:/output/data:ro
+      - publication_output:/output/publication:ro
       - catalog_output:/output/catalog
       - viewer_config:/output/config
     tmpfs:
@@ -139,10 +115,10 @@ services:
       - /var/run
 
 volumes:
-  tiles_output:
-    name: "${OUTPUT_VOLUME_PREFIX:-overture-airgap}-tiles"
   parquet_output:
     name: "${OUTPUT_VOLUME_PREFIX:-overture-airgap}-data"
+  publication_output:
+    name: "${OUTPUT_VOLUME_PREFIX:-overture-airgap}-publication"
   catalog_output:
     name: "${OUTPUT_VOLUME_PREFIX:-overture-airgap}-catalog"
   viewer_config:

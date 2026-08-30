@@ -10,7 +10,6 @@ services:
       - "${VIEWER_PORT:-8088}:8080"
     volumes:
       - ./airgap-output/catalog:/usr/share/nginx/html/catalog:ro
-      - ./airgap-output/tiles:/usr/share/nginx/html/tiles:ro
       - ./airgap-output/data:/usr/share/nginx/html/data:ro
       - ./public/config/viewer-config.json:/usr/share/nginx/html/config/viewer-config.json:ro
     tmpfs:
@@ -18,16 +17,26 @@ services:
       - /var/cache/nginx
       - /var/run
 
-  tiles-smoke-places:
+  tiles-generator:
     image: localhost/overture-tiles-airgap:local
     profiles: ["generate"]
     environment:
-      RELEASE: "2026-04-15.0"
-      THEME: "places"
+      RELEASE: "${OVERTURE_RELEASE:-2026-04-15.0}"
+      THEMES: "${THEMES:-base,buildings,places,divisions,transportation,addresses}"
       BBOX: "${BBOX:-}"
       SOURCE_PATH: "/input/release"
+      PMTILES_S3_PATH: "${PMTILES_S3_PATH:?Set PMTILES_S3_PATH to the generated release S3 URI}"
+      PMTILES_SCRATCH_ROOT: /scratch
+      PMTILES_MIN_FREE_GB: "${PMTILES_MIN_FREE_GB:?Set PMTILES_MIN_FREE_GB}"
       OUTPUT: "/output"
-      PRESERVE_PARQUET: "true"
+      PRESERVE_PARQUET: "${PRESERVE_PARQUET:-true}"
+      S3_REGION: "${S3_REGION:?Set S3_REGION}"
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID:?Set AWS_ACCESS_KEY_ID}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:?Set AWS_SECRET_ACCESS_KEY}"
+      AWS_REGION: "${S3_REGION:?Set S3_REGION}"
+      S3_ENDPOINT_URL: "${S3_ENDPOINT_URL:?Set S3_ENDPOINT_URL}"
+      AWS_EC2_METADATA_DISABLED: "true"
     volumes:
       - ${OVERTURE_RELEASE_DIR:-./data/release/2026-04-15.0}:/input/release:ro
       - ./airgap-output:/output
+      - ${PMTILES_SCRATCH_DIR:-./airgap-output/scratch}:/scratch
