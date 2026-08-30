@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM docker.io/library/golang:1.25.10-alpine3.23 AS s5cmd-builder
+FROM docker.io/library/golang:1.25.13-alpine3.23 AS s5cmd-builder
 
 ARG S5CMD_VERSION=2.3.0
 
