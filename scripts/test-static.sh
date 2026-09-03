@@ -21,6 +21,15 @@ rg -q 'base\) TYPES="[^"]*land_use[^"]*"' "$REPO_ROOT/airgap/tile-generator/bbox
   || die "BBOX filtering must include the base land_use type."
 rg -q 'planetiler_args\+=\(--bounds="\$BBOX"\)' "$REPO_ROOT/airgap/tile-generator/run-airgap.sh" \
   || die "BBOX filtering must constrain Planetiler output bounds."
+if rg -q 's5cmd sync.*SOURCE_PATH.*PLANETILER_INPUT|SOURCE_STAGE' \
+  "$REPO_ROOT/airgap/tile-generator/run-airgap.sh"; then
+  die "S3 source data is still staged in scratch before Planetiler."
+fi
+rg -q -- '--compress-temp="\$PLANETILER_COMPRESS_TEMP"' \
+  "$REPO_ROOT/airgap/tile-generator/run-airgap.sh" \
+  || die "Generator must pass the compressed-temp setting to Planetiler."
+rg -q 'S3InputFiles.open' "$REPO_ROOT/airgap/tile-generator/profiles/OvertureProfile.java" \
+  || die "Overture profile must route S3 input through the range adapter."
 
 printf 'Validating Podman Compose files...\n'
 env \
@@ -68,6 +77,20 @@ if THEMES=places OUTPUT="$generator_test_root/output" \
   PMTILES_SCRATCH_ROOT="$generator_test_root/scratch" PMTILES_S3_PATH=s3://example/pmtiles \
   PMTILES_MIN_FREE_GB=999999999 bash "$REPO_ROOT/airgap/tile-generator/run-airgap.sh" >/dev/null 2>&1; then
   die "Generator accepted an impossible capacity floor."
+fi
+
+if THEMES=places OUTPUT="$generator_test_root/output" \
+  PMTILES_SCRATCH_ROOT="$generator_test_root/scratch" PMTILES_S3_PATH=s3://example/pmtiles \
+  PMTILES_MIN_FREE_GB=1 PLANETILER_COMPRESS_TEMP=true PLANETILER_MMAP_TEMP=true \
+  bash "$REPO_ROOT/airgap/tile-generator/run-airgap.sh" >/dev/null 2>&1; then
+  die "Generator accepted compressed temp with mmap temp enabled."
+fi
+
+if THEMES=places OUTPUT="$generator_test_root/output" \
+  PMTILES_SCRATCH_ROOT="$generator_test_root/scratch" PMTILES_S3_PATH=s3://example/pmtiles \
+  PMTILES_MIN_FREE_GB=1 PMTILES_MAX_SCRATCH_GB=invalid \
+  bash "$REPO_ROOT/airgap/tile-generator/run-airgap.sh" >/dev/null 2>&1; then
+  die "Generator accepted an invalid per-theme scratch ceiling."
 fi
 
 mkdir -p "$generator_test_root/data" "$generator_test_root/catalog"

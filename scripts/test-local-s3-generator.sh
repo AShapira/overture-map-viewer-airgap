@@ -39,10 +39,11 @@ podman_compose_bin >/dev/null
 require_local_image "$TILES_IMAGE"
 
 seed_parquet="$REPO_ROOT/airgap-output/data/release/2026-04-15.0/theme=places/type=place/filtered.parquet"
-parquet_out="$REPO_ROOT/airgap-output/s3-smoke/data/release/2026-04-15.0/theme=places/type=place/filtered.parquet"
 publication_manifest="$REPO_ROOT/airgap-output/s3-smoke/publication/2026-04-15.0.json"
 scratch_root="$REPO_ROOT/airgap-output/s3-smoke/scratch"
 retained_pmtiles="$scratch_root/2026-04-15.0/places/places.pmtiles"
+generator_log="$(mktemp)"
+cap_log="$(mktemp)"
 
 [[ -f "$seed_parquet" ]] || die "Missing seed parquet: $seed_parquet. Generate the local places smoke output first."
 
@@ -56,6 +57,8 @@ cleanup() {
     printf 'Stopping local MinIO...\n'
     compose_local_s3 down >/dev/null 2>&1 || true
   fi
+
+  rm -f -- "$generator_log" "$cap_log"
 
   exit "$status"
 }
@@ -81,10 +84,30 @@ if compose_local_s3 run --rm -T -e THEME=places tiles-smoke-places-s3; then
   die "Generator accepted the removed THEME variable."
 fi
 
-printf 'Running the tile generator from local S3...\n'
-compose_local_s3 run --rm -T tiles-smoke-places-s3
+printf 'Checking the per-theme scratch ceiling...\n'
+compose_local_s3 run --rm -T --entrypoint s5cmd s3-key-check \
+  rm s3://overture-local/pmtiles/release/2026-04-15.0/places.pmtiles >/dev/null 2>&1 || true
+if compose_local_s3 run --rm -T \
+  -e PMTILES_MAX_SCRATCH_GB=0.001 \
+  tiles-smoke-places-s3 >"$cap_log" 2>&1; then
+  die "Generator accepted a run that crossed the per-theme scratch ceiling."
+fi
+rg -q 'theme scratch reached the configured 0.001 GiB ceiling' "$cap_log" \
+  || die "Generator did not report the per-theme scratch ceiling failure."
+if compose_local_s3 run --rm -T --entrypoint s5cmd s3-key-check \
+  head s3://overture-local/pmtiles/release/2026-04-15.0/places.pmtiles >/dev/null 2>&1; then
+  die "Generator published PMTiles after crossing the per-theme scratch ceiling."
+fi
+[[ ! -e "$publication_manifest" ]] \
+  || die "Generator wrote a publication manifest after crossing the per-theme scratch ceiling."
 
-require_nonempty_file "$parquet_out"
+printf 'Running the tile generator from local S3...\n'
+compose_local_s3 run --rm -T tiles-smoke-places-s3 2>&1 | tee "$generator_log"
+
+rg -q 'Indexed [0-9]+ S3 GeoParquet object.*no source download' "$generator_log" \
+  || die "Generator did not confirm direct S3 range input."
+rg -q 'Closed S3 GeoParquet source.*range request' "$generator_log" \
+  || die "Generator did not report S3 range-read statistics."
 require_nonempty_file "$publication_manifest"
 if find "$scratch_root" -type f -name '*.pmtiles' -print -quit | grep -q .; then
   die "A successfully published PMTiles file remains in scratch."
@@ -115,4 +138,3 @@ printf 'Local S3 generator smoke test passed.\n'
 printf 'Verified key: %s\n' 's3://overture-local/release/2026-04-15.0/theme=places/type=place/filtered.parquet'
 printf 'Published PMTiles: %s\n' 's3://overture-local/pmtiles/release/2026-04-15.0/places.pmtiles'
 printf 'Publication manifest: %s\n' "$publication_manifest"
-printf 'Parquet output: %s\n' "$parquet_out"

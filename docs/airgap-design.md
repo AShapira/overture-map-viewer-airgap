@@ -47,7 +47,9 @@ internals and do not impose host package-manager requirements on RHEL.
 Input modes:
 
 - a release bind-mounted at `/input/release`
-- S3-compatible input selected with `SOURCE_PATH=s3://bucket/path`
+- S3-compatible input selected with `SOURCE_PATH=s3://bucket/path`; GeoParquet
+  payloads are read with seekable HTTP range requests and are not copied into
+  local scratch
 
 The default source mount is `./data/release/2026-04-15.0`. Override it through
 `OVERTURE_RELEASE_DIR`.
@@ -83,8 +85,8 @@ airgap-output/
 
 1. Mount an Overture release or configure an internal S3 source.
 2. Run one rootless generator job for the ordered `THEMES` configuration.
-3. For each theme, generate in monitored local scratch, upload and verify its S3
-   object, then delete the local PMTiles archive.
+3. For each theme, generate in compressed, monitored local scratch, upload and
+   verify its S3 object, then delete the local PMTiles archive.
 4. Write a publication manifest only after all configured themes succeed.
 5. Generate the local catalog from that manifest.
 6. Start the read-only viewer. The browser reads PMTiles from an internal

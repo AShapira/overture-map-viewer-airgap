@@ -74,8 +74,11 @@ services:
       PMTILES_S3_PATH: "s3://overture-local/pmtiles/release/2026-04-15.0"
       PMTILES_SCRATCH_ROOT: /scratch
       PMTILES_MIN_FREE_GB: "1"
+      PMTILES_MAX_SCRATCH_GB: "95"
       OUTPUT: "/output"
-      PRESERVE_PARQUET: "true"
+      PRESERVE_PARQUET: "false"
+      PLANETILER_COMPRESS_TEMP: "true"
+      PLANETILER_MMAP_TEMP: "false"
       S3_REGION: "us-east-1"
       AWS_ACCESS_KEY_ID: "minioadmin"
       AWS_SECRET_ACCESS_KEY: "minioadmin"

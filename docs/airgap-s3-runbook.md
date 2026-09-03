@@ -8,7 +8,7 @@ in a local output volume.
 ## 1. Data Flow
 
 ```text
-mounted or S3 GeoParquet release
+mounted GeoParquet or direct S3 ranged GeoParquet reads
   -> rootless one-shot tile-generator
   -> monitored local scratch folder
   -> one completed theme archive
@@ -62,7 +62,10 @@ export PMTILES_S3_PATH=s3://overture-generated/pmtiles/release/$RELEASE
 export PMTILES_HTTP_BASE=https://s3-gateway.internal/overture-generated/pmtiles/release/$RELEASE/
 export PMTILES_SCRATCH_DIR=/path/to/large-local-scratch
 export PMTILES_MIN_FREE_GB=100
-export PRESERVE_PARQUET=true
+export PMTILES_MAX_SCRATCH_GB=95
+export PRESERVE_PARQUET=false
+export PLANETILER_COMPRESS_TEMP=true
+export PLANETILER_MMAP_TEMP=false
 
 export S3_ENDPOINT_URL=https://s3.internal
 export S3_REGION=us-east-1
@@ -76,8 +79,17 @@ singular `THEME` variable is rejected.
 
 `BBOX` is `min_lon,min_lat,max_lon,max_lat`; leave it empty for whole-world
 generation. `PMTILES_MIN_FREE_GB` is a safety reserve, not an estimate of total
-required storage. The scratch folder must fit one theme's downloaded input,
-Planetiler temporary files, and final archive at the same time.
+required storage. `PMTILES_MAX_SCRATCH_GB` is an optional per-theme ceiling
+checked every second; set it to `95` to keep a run below a 100 GiB local limit
+with headroom for detection and shutdown. S3 input is range-read directly, so
+scratch needs to fit Planetiler temporary files and the final archive, not a
+second copy of the source GeoParquet.
+
+`PLANETILER_COMPRESS_TEMP=true` and `PLANETILER_MMAP_TEMP=false` are the
+recommended S3 settings. Compression trades CPU time for substantially less
+feature-store space. `PRESERVE_PARQUET=false` is required when the goal is no
+local GeoParquet payload; setting it to `true` intentionally copies source or
+filtered GeoParquet to the durable output area after generation.
 
 Protect credentials in the operator environment and shell history. Use a
 site-approved protected environment file when appropriate.
@@ -127,7 +139,10 @@ podman_s3 \
   -e SOURCE_PATH \
   -e PMTILES_S3_PATH \
   -e PMTILES_MIN_FREE_GB \
+  -e PMTILES_MAX_SCRATCH_GB \
   -e PRESERVE_PARQUET \
+  -e PLANETILER_COMPRESS_TEMP \
+  -e PLANETILER_MMAP_TEMP \
   -e PMTILES_SCRATCH_ROOT=/scratch \
   -e OUTPUT=/output \
   --mount "type=bind,source=$PMTILES_SCRATCH_DIR,target=/scratch" \
@@ -155,9 +170,11 @@ podman_s3 \
   localhost/overture-tiles-airgap:local
 ```
 
-The job processes themes sequentially. It monitors scratch capacity every five
-seconds while Planetiler runs, verifies each uploaded object's byte size, and
-deletes the local archive before starting the next theme.
+The job processes themes sequentially. It monitors free space and current-theme
+scratch usage every second while Planetiler runs, reports the observed peak,
+verifies each uploaded object's byte size, and deletes the local archive before
+starting the next theme. The ceiling is fail-safe: it stops the run and does not
+automatically spill Planetiler's mutable temp files into S3.
 
 On generation or capacity failure, incomplete current-theme scratch is removed.
 On upload or verification failure, the completed archive is retained at:
@@ -176,6 +193,9 @@ THEMES="$THEMES" \
 PMTILES_S3_PATH="$PMTILES_S3_PATH" \
 PMTILES_SCRATCH_DIR="$PMTILES_SCRATCH_DIR" \
 PMTILES_MIN_FREE_GB="$PMTILES_MIN_FREE_GB" \
+PMTILES_MAX_SCRATCH_GB="$PMTILES_MAX_SCRATCH_GB" \
+PLANETILER_COMPRESS_TEMP="$PLANETILER_COMPRESS_TEMP" \
+PLANETILER_MMAP_TEMP="$PLANETILER_MMAP_TEMP" \
 S3_REGION="$S3_REGION" \
 S3_ENDPOINT_URL="$S3_ENDPOINT_URL" \
 AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \

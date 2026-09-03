@@ -85,9 +85,11 @@ AWS_SECRET_ACCESS_KEY=minioadmin \
   podman-compose -f compose.airgap.yml --profile generate run --rm -T tiles-generator
 ```
 
-`THEMES` defaults to all six supported themes. The generator checks scratch
-capacity before each theme and during Planetiler, uploads and verifies the exact
-S3 object, then removes the local PMTiles file. Generate the catalog from the
+`THEMES` defaults to all six supported themes. For an S3 `SOURCE_PATH`, the
+generator range-reads GeoParquet objects directly and does not stage their
+payloads in scratch. It checks both the free-space reserve and optional
+per-theme scratch ceiling during Planetiler, uploads and verifies the exact S3
+object, then removes the local PMTiles file. Generate the catalog from the
 success manifest and the browser-facing S3 HTTP URL:
 
 ```bash
@@ -123,6 +125,21 @@ The S3 key layout must match the mounted release layout:
 ```text
 <prefix>/theme=<theme>/type=<type>/<file>.parquet
 ```
+
+For a whole-world divisions run constrained to less than 100 GiB of local
+scratch, use:
+
+```dotenv
+THEMES=divisions
+BBOX=
+PRESERVE_PARQUET=false
+PLANETILER_COMPRESS_TEMP=true
+PLANETILER_MMAP_TEMP=false
+PMTILES_MAX_SCRATCH_GB=95
+```
+
+The 95 GiB ceiling leaves operating headroom; reaching it stops the theme and
+prevents publication. It is a guard, not a promise that every release will fit.
 
 The smoke workflow writes its publication manifest and optional preserved
 GeoParquet to `airgap-output/s3-smoke/`, while verified PMTiles remain in MinIO.

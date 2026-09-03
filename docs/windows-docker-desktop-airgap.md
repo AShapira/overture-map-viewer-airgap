@@ -35,10 +35,11 @@ air-gapped Artifactory must contain:
 3. A mirrored Node 20 image for the catalog job.
 
 Use immutable tags or digest-pinned references and keep TLS verification
-enabled. Select a local scratch folder on a filesystem large enough for one
-theme's input, Planetiler temporary data, and PMTiles output. A whole-world run
-can require substantially more scratch than its final archives; the configured
-free-space floor protects the workstation but is not a size estimate.
+enabled. Select a local scratch folder on a filesystem large enough for
+Planetiler temporary data and one PMTiles output. S3 GeoParquet is range-read
+directly and is not staged there. A whole-world run can still require
+substantially more scratch than its final archive; the free-space floor and
+per-theme ceiling are independent safety controls, not size estimates.
 
 ## 3. Configure `.env.windows-airgap`
 
@@ -52,7 +53,9 @@ CATALOG_IMAGE=artifactory.airgap.example/dockerhub/library/node:20-alpine
 OVERTURE_RELEASE=2026-04-15.0
 THEMES=base,buildings,places,divisions,transportation,addresses
 BBOX=
-PRESERVE_PARQUET=true
+PRESERVE_PARQUET=false
+PLANETILER_COMPRESS_TEMP=true
+PLANETILER_MMAP_TEMP=false
 
 S3_BUCKET=overture-source
 SOURCE_RELEASE_PREFIX=release
@@ -64,6 +67,7 @@ AWS_SECRET_ACCESS_KEY='replace-with-s3-secret-key'
 
 PMTILES_SCRATCH_DIR=D:/overture-scratch
 PMTILES_MIN_FREE_GB=100
+PMTILES_MAX_SCRATCH_GB=95
 PMTILES_HTTP_BASE=https://s3-gateway.airgap.example/overture-source/pmtiles/release/2026-04-15.0/
 
 DOWNLOAD_MIN_ZOOM=15
@@ -77,8 +81,14 @@ singular `THEME` setting is not accepted.
 
 `BBOX` is `min_lon,min_lat,max_lon,max_lat`; leave it empty for whole-world
 generation. `PMTILES_MIN_FREE_GB` is the safety reserve that must remain on the
-scratch filesystem. The generator checks it before every theme and every five
-seconds while Planetiler runs.
+scratch filesystem. `PMTILES_MAX_SCRATCH_GB` limits current-theme scratch;
+`95` is the recommended ceiling for a 100 GiB local limit. The generator checks
+both every second while Planetiler runs. Reaching either limit stops generation
+without publishing the incomplete theme.
+
+For a whole-world divisions-only run, set `THEMES=divisions`, keep `BBOX`
+empty, and retain the compression, mmap, preservation, and 95 GiB values shown
+above. The cap is a guard rather than a guarantee that a future release fits.
 
 The source and generated layouts are:
 
@@ -132,9 +142,10 @@ docker compose --env-file .env.windows-airgap -f compose.windows-airgap.yml --pr
 ```
 
 The job processes themes sequentially. For each theme it checks capacity,
-generates one archive in `PMTILES_SCRATCH_DIR`, uploads the exact final key,
-compares the remote and local byte sizes, and deletes the local archive. It does
-not begin the next theme until verification succeeds.
+range-reads source GeoParquet from S3, generates one archive in
+`PMTILES_SCRATCH_DIR`, uploads the exact final key, compares the remote and local
+byte sizes, and deletes the local archive. It does not begin the next theme
+until verification succeeds.
 
 If generation fails or the capacity floor is crossed, incomplete current-theme
 scratch is removed and the job stops. If upload or verification fails, the

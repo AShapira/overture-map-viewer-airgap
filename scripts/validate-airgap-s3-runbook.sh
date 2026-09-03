@@ -64,6 +64,11 @@ viewer_root="$validation_root/viewer-data"
 viewer_config="$validation_root/viewer-config.json"
 source_object_name="part-00000.parquet"
 normalized_seed="$validation_root/$source_object_name"
+if [[ -n "$bbox" ]]; then
+  preserved_object_name="filtered.parquet"
+else
+  preserved_object_name="$source_object_name"
+fi
 
 [[ -f "$seed_parquet" ]] || die "Missing seed parquet: $seed_parquet. Generate the local places smoke output first."
 
@@ -172,7 +177,7 @@ run_tile_image \
   --mount "type=bind,source=$scratch_root,target=/scratch" \
   "$TILES_IMAGE"
 
-require_nonempty_file "$generator_output/data/release/$release/theme=places/type=place/$source_object_name"
+require_nonempty_file "$generator_output/data/release/$release/theme=places/type=place/$preserved_object_name"
 require_nonempty_file "$generator_output/publication/$release.json"
 if find "$scratch_root" -type f -name '*.pmtiles' -print -quit | grep -q .; then
   die "A successfully published PMTiles file remains in scratch."
