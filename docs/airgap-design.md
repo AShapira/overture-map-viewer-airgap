@@ -9,7 +9,7 @@ workflows:
 - download visible data as GeoJSON ZIP files from local parquet
 
 The local development and RHEL operator environment is RHEL 10 on WSL2 with
-rootless Podman. Production images can also run on Docker Desktop for Windows
+rootless Podman. Production images can also run on Podman Desktop for Windows
 with the separate `compose.windows-airgap.yml` workflow. The always-on viewer
 remains small and static; tile generation is a separate batch image because it
 needs Java, DuckDB, S3 tooling, temporary storage, and broader filesystem access.
@@ -73,7 +73,7 @@ download manifest from a successful publication manifest. Local metadata uses:
 
 ```text
 airgap-output/
-  data/release/<release>/theme=<theme>/type=<type>/filtered.parquet
+  data/release/<release>/theme=<theme>/type=<type>/part-*.parquet
   publication/<release>.json
   catalog/catalog.json
   catalog/<release>/catalog.json
@@ -84,7 +84,8 @@ airgap-output/
 ## Data Flow
 
 1. Mount an Overture release or configure an internal S3 source.
-2. Run one rootless generator job for the ordered `THEMES` configuration.
+2. Run one generator job for the ordered `THEMES` configuration, using rootless
+   Podman on RHEL or the operator-selected Podman Desktop connection on Windows.
 3. For each theme, generate in compressed, monitored local scratch, upload and
    verify its S3 object, then delete the local PMTiles archive.
 4. Write a publication manifest only after all configured themes succeed.
@@ -106,7 +107,7 @@ scratch filesystem. PMTiles are not accumulated in a local output volume.
 ## Security and Host Integration
 
 - The RHEL workflow requires rootless Podman; its project scripts reject
-  rootful execution. The Windows production workflow uses Docker Desktop Linux
+  rootful execution. The Windows production workflow uses Podman Desktop Linux
   containers and imported Artifactory images as documented separately.
 - The viewer receives no cloud credentials and only read-only data mounts.
 - Only the generator receives S3 credentials; catalog and viewer use the

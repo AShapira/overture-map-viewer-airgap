@@ -19,15 +19,7 @@ done < <(find "$REPO_ROOT/scripts" "$REPO_ROOT/airgap" -type f -name '*.sh' -pri
 printf 'Checking BBOX theme coverage...\n'
 rg -q 'base\) TYPES="[^"]*land_use[^"]*"' "$REPO_ROOT/airgap/tile-generator/bbox.sh" \
   || die "BBOX filtering must include the base land_use type."
-rg -q 'planetiler_args\+=\(--bounds="\$BBOX"\)' "$REPO_ROOT/airgap/tile-generator/run-airgap.sh" \
-  || die "BBOX filtering must constrain Planetiler output bounds."
-if rg -q 's5cmd sync.*SOURCE_PATH.*PLANETILER_INPUT|SOURCE_STAGE' \
-  "$REPO_ROOT/airgap/tile-generator/run-airgap.sh"; then
-  die "S3 source data is still staged in scratch before Planetiler."
-fi
-rg -q -- '--compress-temp="\$PLANETILER_COMPRESS_TEMP"' \
-  "$REPO_ROOT/airgap/tile-generator/run-airgap.sh" \
-  || die "Generator must pass the compressed-temp setting to Planetiler."
+python3 -B "$REPO_ROOT/scripts/test-generator.py"
 rg -q 'S3InputFiles.open' "$REPO_ROOT/airgap/tile-generator/profiles/OvertureProfile.java" \
   || die "Overture profile must route S3 input through the range adapter."
 
@@ -43,9 +35,6 @@ env \
 "$(podman_compose_bin)" -f "$LOCAL_S3_COMPOSE_FILE" config >/dev/null
 
 printf 'Checking single-stage generation configuration...\n'
-rg -q 'THEMES=.*base,buildings,places,divisions,transportation,addresses' \
-  "$REPO_ROOT/airgap/tile-generator/run-airgap.sh" \
-  || die "Generator must default to all supported themes."
 if rg -q '^  publish-pmtiles:' "$REPO_ROOT/compose.windows-airgap.yml"; then
   die "The separate PMTiles publisher service remains configured."
 fi
@@ -118,26 +107,19 @@ cleanup_generator_test
 trap - EXIT
 
 printf 'Checking for unsupported local tooling...\n'
-if find "$REPO_ROOT/scripts" -type f \( -name '*.ps1' -o -name '*.bat' -o -name '*.cmd' \) -print -quit | grep -q .; then
-  find "$REPO_ROOT/scripts" -type f \( -name '*.ps1' -o -name '*.bat' -o -name '*.cmd' \) -print >&2
-  die "Windows operator scripts remain tracked."
-fi
-
 runtime_paths=(
   "$REPO_ROOT/README.md"
   "$REPO_ROOT/docs/airgap-design.md"
   "$REPO_ROOT/docs/airgap-s3-runbook.md"
+  "$REPO_ROOT/docs/windows-podman-desktop-airgap.md"
   "$REPO_ROOT/scripts"
   "$REPO_ROOT/compose.airgap.yml"
   "$REPO_ROOT/compose.local-s3.yml"
+  "$REPO_ROOT/compose.windows-airgap.yml"
 )
 
-if rg -n -i -g '!test-static.sh' 'powershell|\.ps1\b|docker[[:space:]]+(build|compose|images|load|run|save)' "${runtime_paths[@]}"; then
-  die "Unsupported Windows/Docker local-runtime instructions remain."
-fi
-
-if rg -n -g '!test-static.sh' '(^|[^[:alpha:]])[A-Za-z]:\\|\\(scripts|airgap-output|public)\\' "${runtime_paths[@]}"; then
-  die "Windows paths remain in the supported local-runtime material."
+if rg -n -i -g '!test-static.sh' 'docker[[:space:]]+(build|compose|images|load|run|save)|Docker Desktop' "${runtime_paths[@]}"; then
+  die "Unsupported Docker local-runtime instructions remain."
 fi
 
 printf 'Running npm lint...\n'

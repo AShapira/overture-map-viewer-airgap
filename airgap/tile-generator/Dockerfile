@@ -61,7 +61,7 @@ COPY --from=adapter-builder /app/planetiler.jar /app/planetiler.jar
 RUN mkdir -p /app && \
     apt-get update && \
     apt-get upgrade -y && \
-    apt-get install -y --no-install-recommends ca-certificates curl bash gzip tar unzip zip findutils && \
+    apt-get install -y --no-install-recommends ca-certificates curl bash gzip tar unzip zip findutils python3 && \
     rm -rf /var/lib/apt/lists/* && \
     DUCKDB_ARCH=$([ "${TARGETARCH}" = "arm64" ] && echo "aarch64" || echo "amd64") && \
     curl -fsSL "https://github.com/duckdb/duckdb/releases/download/v${DUCKDB_VERSION}/duckdb_cli-linux-${DUCKDB_ARCH}.zip" \
@@ -83,6 +83,7 @@ COPY --from=adapter-builder /app/s3-parquet-adapter.jar /app/s3-parquet-adapter.
 COPY profiles /app/profiles
 COPY bbox.sh /app/bbox.sh
 COPY run-airgap.sh /app/run-airgap.sh
+COPY generator.py capacity.py pmtiles_check.py capacity-priors.json /app/
 
 RUN chmod +x /app/*.sh
 

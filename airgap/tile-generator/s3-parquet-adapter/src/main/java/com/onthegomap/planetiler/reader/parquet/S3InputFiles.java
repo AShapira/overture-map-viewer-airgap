@@ -121,7 +121,8 @@ public final class S3InputFiles {
     }
   }
 
-  private static S3Client createClient() {
+  public static S3Client createClient() {
+    Configurator.setLevel("software.amazon.awssdk", Level.WARN);
     String region = firstNonBlank(System.getenv("S3_REGION"), System.getenv("AWS_REGION"), "us-west-2");
     String endpoint = System.getenv("S3_ENDPOINT_URL");
     var credentials = System.getenv("AWS_ACCESS_KEY_ID") == null

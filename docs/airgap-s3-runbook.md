@@ -12,7 +12,7 @@ mounted GeoParquet or direct S3 ranged GeoParquet reads
   -> rootless one-shot tile-generator
   -> monitored local scratch folder
   -> one completed theme archive
-  -> upload and byte-size verification in S3
+  -> upload and streamed SHA-256 and byte-size verification in S3
   -> immediate local deletion
   -> publication manifest after all configured themes succeed
   -> local catalog/config and optional preserved GeoParquet
@@ -64,6 +64,9 @@ export PMTILES_SCRATCH_DIR=/path/to/large-local-scratch
 export PMTILES_MIN_FREE_GB=100
 export PMTILES_MAX_SCRATCH_GB=95
 export PRESERVE_PARQUET=false
+export PMTILES_MAX_LOCAL_GB=100
+export PLANETILER_SORT_MAX_READERS=1
+export PLANETILER_SORT_MAX_WRITERS=1
 export PLANETILER_COMPRESS_TEMP=true
 export PLANETILER_MMAP_TEMP=false
 
@@ -79,17 +82,21 @@ singular `THEME` variable is rejected.
 
 `BBOX` is `min_lon,min_lat,max_lon,max_lat`; leave it empty for whole-world
 generation. `PMTILES_MIN_FREE_GB` is a safety reserve, not an estimate of total
-required storage. `PMTILES_MAX_SCRATCH_GB` is an optional per-theme ceiling
-checked every second; set it to `95` to keep a run below a 100 GiB local limit
-with headroom for detection and shutdown. S3 input is range-read directly, so
+required storage. `PMTILES_MAX_SCRATCH_GB` is an optional per-theme ceiling;
+`PMTILES_MAX_LOCAL_GB` counts the combined scratch/output footprint, including
+older retained files. Both are sampled twice per second and can briefly
+overshoot before shutdown. Leave headroom beyond the configured ceiling.
+S3 input is range-read directly, so
 scratch needs to fit Planetiler temporary files and the final archive, not a
 second copy of the source GeoParquet.
 
 `PLANETILER_COMPRESS_TEMP=true` and `PLANETILER_MMAP_TEMP=false` are the
 recommended S3 settings. Compression trades CPU time for substantially less
 feature-store space. `PRESERVE_PARQUET=false` is required when the goal is no
-local GeoParquet payload; setting it to `true` intentionally copies source or
-filtered GeoParquet to the durable output area after generation.
+local GeoParquet payload; setting it to `true` exports selected records directly
+into bounded partitions in the durable output area after generation. See the
+[storage model and estimator](../README.md#processing-storage-and-capacity-planning)
+before selecting limits.
 
 Protect credentials in the operator environment and shell history. Use a
 site-approved protected environment file when appropriate.
@@ -140,6 +147,9 @@ podman_s3 \
   -e PMTILES_S3_PATH \
   -e PMTILES_MIN_FREE_GB \
   -e PMTILES_MAX_SCRATCH_GB \
+  -e PMTILES_MAX_LOCAL_GB \
+  -e PLANETILER_SORT_MAX_READERS \
+  -e PLANETILER_SORT_MAX_WRITERS \
   -e PRESERVE_PARQUET \
   -e PLANETILER_COMPRESS_TEMP \
   -e PLANETILER_MMAP_TEMP \
@@ -161,6 +171,8 @@ podman_s3 \
   -e SOURCE_PATH=/input/release \
   -e PMTILES_S3_PATH \
   -e PMTILES_MIN_FREE_GB \
+  -e PMTILES_MAX_SCRATCH_GB \
+  -e PMTILES_MAX_LOCAL_GB \
   -e PRESERVE_PARQUET \
   -e PMTILES_SCRATCH_ROOT=/scratch \
   -e OUTPUT=/output \
@@ -170,9 +182,9 @@ podman_s3 \
   localhost/overture-tiles-airgap:local
 ```
 
-The job processes themes sequentially. It monitors free space and current-theme
-scratch usage every second while Planetiler runs, reports the observed peak,
-verifies each uploaded object's byte size, and deletes the local archive before
+The job processes themes sequentially. It monitors free space and combined local
+usage twice per second while child processes run, reports the observed peak,
+verifies each uploaded object's SHA-256 and byte size, and deletes the local archive before
 starting the next theme. The ceiling is fail-safe: it stops the run and does not
 automatically spill Planetiler's mutable temp files into S3.
 
@@ -180,11 +192,12 @@ On generation or capacity failure, incomplete current-theme scratch is removed.
 On upload or verification failure, the completed archive is retained at:
 
 ```text
-<scratch>/<release>/<theme>/<theme>.pmtiles
+<scratch>/<release>/<unique-run-id>/<theme>/<theme>.pmtiles
 ```
 
-The success marker is `airgap-output/publication/<release>.json`. It is removed
-at job start and recreated atomically only after all configured themes publish.
+The success marker is `airgap-output/publication/<release>.json`. Previous
+publication state is preserved until a complete new run succeeds. Use a fresh
+S3 destination prefix for each generation; existing PMTiles are never overwritten.
 
 The Compose wrapper provides the same workflow:
 
@@ -282,13 +295,15 @@ curl -fsS --range 0-1023 "${PMTILES_HTTP_BASE%/}/places.pmtiles" >/dev/null
 The PMTiles response must be `206`, all configured themes must appear in the
 catalog, and no local PMTiles files should remain after a successful run.
 
-The repository's MinIO validation exercises exact source keys, capacity
-rejection, upload verification and deletion, publication-manifest catalogs,
-remote HTTP range reads, and viewer startup:
+The repository's isolated MinIO validation exercises exact source keys, capacity
+rejection, streamed checksums, deliberate write-denied retention across two
+runs, schema-preserving downloads, publication-manifest catalogs, HTTP 206/CORS,
+and viewer startup. Supply a bounded places fixture intersecting
+`34.75,32.03,34.85,32.13`; each test creates its own store and retains evidence:
 
 ```bash
-./scripts/test-local-s3-generator.sh
-./scripts/validate-airgap-s3-runbook.sh
+SEED_PARQUET=/path/to/place.parquet ./scripts/test-local-s3-generator.sh
+SEED_PARQUET=/path/to/place.parquet ./scripts/validate-airgap-s3-runbook.sh
 ```
 
 ## 10. Troubleshooting and Operations

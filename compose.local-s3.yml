@@ -63,6 +63,8 @@ services:
         mc anonymous set download local/overture-generated/pmtiles
 
   tiles-smoke-places-s3:
+    logging:
+      driver: none
     image: localhost/overture-tiles-airgap:local
     depends_on:
       - minio
@@ -75,6 +77,11 @@ services:
       PMTILES_SCRATCH_ROOT: /scratch
       PMTILES_MIN_FREE_GB: "1"
       PMTILES_MAX_SCRATCH_GB: "95"
+      PMTILES_MAX_LOCAL_GB: "${PMTILES_MAX_LOCAL_GB:-}"
+      PLANETILER_THREADS: "${PLANETILER_THREADS:-12}"
+      PLANETILER_SORT_MAX_READERS: "${PLANETILER_SORT_MAX_READERS:-1}"
+      PLANETILER_SORT_MAX_WRITERS: "${PLANETILER_SORT_MAX_WRITERS:-1}"
+      GENERATOR_IMAGE_ID: "${GENERATOR_IMAGE_ID:-not-provided}"
       OUTPUT: "/output"
       PRESERVE_PARQUET: "false"
       PLANETILER_COMPRESS_TEMP: "true"

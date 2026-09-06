@@ -1,11 +1,18 @@
+x-podman:
+  in_pod: false
+
 services:
   tiles-generator:
     profiles: ["generate"]
     image: "${TILES_IMAGE:?Set TILES_IMAGE to the Artifactory tile-generator image}"
-    pull_policy: missing
+    pull_policy: never
     restart: "no"
+    mem_limit: "${GENERATOR_MEMORY:-24g}"
+    cpus: "${GENERATOR_CPUS:-12}"
+    logging:
+      driver: none
     env_file:
-      - .env.windows-airgap
+      - "${AIRGAP_ENV_FILE:-.env.windows-airgap}"
     environment:
       RELEASE: "${OVERTURE_RELEASE:?Set OVERTURE_RELEASE}"
       THEMES: "${THEMES:-base,buildings,places,divisions,transportation,addresses}"
@@ -13,8 +20,14 @@ services:
       SOURCE_PATH: "s3://${S3_BUCKET:?Set S3_BUCKET}/${SOURCE_RELEASE_PREFIX:-release}/${OVERTURE_RELEASE:?Set OVERTURE_RELEASE}"
       PMTILES_S3_PATH: "s3://${S3_BUCKET:?Set S3_BUCKET}/${PMTILES_RELEASE_PREFIX:-pmtiles/release}/${OVERTURE_RELEASE:?Set OVERTURE_RELEASE}"
       PMTILES_SCRATCH_ROOT: /scratch
+      PMTILES_ACCOUNTING_ROOT: "${PMTILES_ACCOUNTING_ROOT:-}"
       PMTILES_MIN_FREE_GB: "${PMTILES_MIN_FREE_GB:?Set PMTILES_MIN_FREE_GB}"
       PMTILES_MAX_SCRATCH_GB: "${PMTILES_MAX_SCRATCH_GB:-95}"
+      PMTILES_MAX_LOCAL_GB: "${PMTILES_MAX_LOCAL_GB:-}"
+      PLANETILER_THREADS: "${PLANETILER_THREADS:-12}"
+      PLANETILER_SORT_MAX_READERS: "${PLANETILER_SORT_MAX_READERS:-1}"
+      PLANETILER_SORT_MAX_WRITERS: "${PLANETILER_SORT_MAX_WRITERS:-1}"
+      GENERATOR_IMAGE_ID: "${GENERATOR_IMAGE_ID:-not-provided}"
       OUTPUT: /output
       PRESERVE_PARQUET: "${PRESERVE_PARQUET:-false}"
       PLANETILER_COMPRESS_TEMP: "${PLANETILER_COMPRESS_TEMP:-true}"
@@ -23,18 +36,25 @@ services:
       AWS_REGION: "${S3_REGION:?Set S3_REGION}"
       S3_ENDPOINT_URL: "${S3_ENDPOINT_URL:?Set S3_ENDPOINT_URL}"
       AWS_EC2_METADATA_DISABLED: "true"
+      AWS_CA_BUNDLE: "${AWS_CA_BUNDLE:-}"
+      JAVA_TOOL_OPTIONS: "${JAVA_TOOL_OPTIONS:-}"
     volumes:
-      - parquet_output:/output/data
-      - publication_output:/output/publication
+      - type: bind
+        source: "${OUTPUT_DIR:?Set OUTPUT_DIR to the local state directory}"
+        target: /output
       - type: bind
         source: "${PMTILES_SCRATCH_DIR:?Set PMTILES_SCRATCH_DIR to a local folder with sufficient capacity}"
         target: /scratch
+      - type: bind
+        source: "${S3_TRUST_DIR:?Set S3_TRUST_DIR to a directory containing site CA files}"
+        target: /trust
+        read_only: true
     security_opt:
       - no-new-privileges:true
 
   catalog:
     image: "${CATALOG_IMAGE:?Set CATALOG_IMAGE to the Artifactory Node runtime image}"
-    pull_policy: missing
+    pull_policy: never
     restart: "no"
     read_only: true
     cap_drop:
@@ -83,20 +103,24 @@ services:
             features: { search: false, download: true, externalDocs: false },
             download: { minZoom },
           };
+          fs.mkdirSync("/output/config", { recursive: true });
+          fs.mkdirSync("/output/data", { recursive: true });
           fs.writeFileSync("/output/config/viewer-config.json", `$${JSON.stringify(config, null, 2)}\n`);
         '
     volumes:
-      - ./scripts/generate-airgap-catalog.mjs:/app/generate-airgap-catalog.mjs:ro
-      - parquet_output:/output/data:ro
-      - publication_output:/output/publication:ro
-      - catalog_output:/output/catalog
-      - viewer_config:/output/config
+      - type: bind
+        source: ./scripts/generate-airgap-catalog.mjs
+        target: /app/generate-airgap-catalog.mjs
+        read_only: true
+      - type: bind
+        source: "${OUTPUT_DIR:?Set OUTPUT_DIR}"
+        target: /output
     tmpfs:
       - /tmp
 
   viewer:
     image: "${VIEWER_IMAGE:?Set VIEWER_IMAGE to the Artifactory viewer image}"
-    pull_policy: missing
+    pull_policy: never
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -109,20 +133,19 @@ services:
     ports:
       - "${VIEWER_PORT:-8088}:8080"
     volumes:
-      - parquet_output:/usr/share/nginx/html/data:ro
-      - catalog_output:/usr/share/nginx/html/catalog:ro
-      - viewer_config:/usr/share/nginx/html/config:ro
+      - type: bind
+        source: "${OUTPUT_DIR:?Set OUTPUT_DIR}/data"
+        target: /usr/share/nginx/html/data
+        read_only: true
+      - type: bind
+        source: "${OUTPUT_DIR:?Set OUTPUT_DIR}/catalog"
+        target: /usr/share/nginx/html/catalog
+        read_only: true
+      - type: bind
+        source: "${OUTPUT_DIR:?Set OUTPUT_DIR}/config"
+        target: /usr/share/nginx/html/config
+        read_only: true
     tmpfs:
       - /tmp
       - /var/cache/nginx
       - /var/run
-
-volumes:
-  parquet_output:
-    name: "${OUTPUT_VOLUME_PREFIX:-overture-airgap}-data"
-  publication_output:
-    name: "${OUTPUT_VOLUME_PREFIX:-overture-airgap}-publication"
-  catalog_output:
-    name: "${OUTPUT_VOLUME_PREFIX:-overture-airgap}-catalog"
-  viewer_config:
-    name: "${OUTPUT_VOLUME_PREFIX:-overture-airgap}-config"
