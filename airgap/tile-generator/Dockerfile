@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1.7
 ARG PLANETILER_VERSION=0.10.2
 
-FROM docker.io/library/golang:1.25.13-alpine3.23 AS s5cmd-builder
+FROM docker.io/library/golang:1.27.1-alpine3.23@sha256:d9e2f2f07b10cc922da3e80e035c3058810b328d5aef82d2c63680967c5e2ec9 AS s5cmd-builder
 
 ARG S5CMD_VERSION=2.3.0
 
 RUN go install "github.com/peak/s5cmd/v2@v${S5CMD_VERSION}"
 
-FROM docker.io/library/eclipse-temurin:25-jdk-noble AS adapter-builder
+FROM docker.io/library/eclipse-temurin:25-jdk-noble@sha256:534968c051301957beae735e7ba1db54d99ddecf08746d3b9d4f318cc132dbc3 AS adapter-builder
 
 ARG PLANETILER_VERSION
 
@@ -47,11 +47,11 @@ RUN cd /build/s3-parquet-adapter && \
     cd /tmp/planetiler-patch-classes && \
     jar --update --file /app/s3-parquet-adapter.jar com/onthegomap/planetiler/reader/parquet/ParquetInputFile*.class
 
-FROM docker.io/library/eclipse-temurin:25-jdk-noble
+FROM docker.io/library/eclipse-temurin:25-jdk-noble@sha256:534968c051301957beae735e7ba1db54d99ddecf08746d3b9d4f318cc132dbc3
 
 ARG TARGETARCH
 ARG AIRCOMPRESSOR_VERSION=2.0.3
-ARG DUCKDB_VERSION=1.5.1
+ARG DUCKDB_VERSION=1.5.5
 
 LABEL org.opencontainers.image.title="overture-tiles-airgap"
 

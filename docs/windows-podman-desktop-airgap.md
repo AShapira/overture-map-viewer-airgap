@@ -51,6 +51,10 @@ Alternatively pull approved digest-pinned images from internal Artifactory
 before starting the job. Use `podman login <internal-registry>` interactively.
 Compose uses `pull_policy: never`; image absence fails preflight.
 
+For the catalog runtime, mirror the same Node 24 image used by the viewer build:
+`docker.io/library/node:24.20.0-alpine3.24@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf`.
+Set `CATALOG_IMAGE` to its verified internal Artifactory digest after mirroring.
+
 ## Configure
 
 Create Git-ignored `.env.windows-airgap`; it contains S3 credentials and must be

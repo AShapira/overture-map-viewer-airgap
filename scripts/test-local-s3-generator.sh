@@ -17,7 +17,7 @@ done
 require_rootless_podman
 require_command curl
 require_command node
-for image in "$TILES_IMAGE" docker.io/minio/minio:latest docker.io/minio/mc:latest; do require_local_image "$image"; done
+for image in "$TILES_IMAGE" docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e docker.io/minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727; do require_local_image "$image"; done
 if [[ -n "$viewer_port" ]]; then
   [[ "$viewer_port" =~ ^[0-9]+$ ]] && ((viewer_port >= 1024 && viewer_port <= 65535)) || die 'Invalid viewer port'
   require_local_image "$VIEWER_IMAGE"
@@ -42,7 +42,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 podman run -d --pull=never --name "$name" -p 127.0.0.1::9000 \
   -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
-  --mount "type=bind,source=$root/store,target=/data" docker.io/minio/minio:latest server /data >/dev/null
+  --mount "type=bind,source=$root/store,target=/data" docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e server /data >/dev/null
 port="$(podman port "$name" 9000/tcp | sed 's/.*://')"
 wait_for_http "http://127.0.0.1:$port/minio/health/live" 'isolated MinIO'
 run_image() {
@@ -54,7 +54,7 @@ run_image() {
 run_mc() {
   podman run --rm --pull=never --network "container:$name" \
     --mount "type=bind,source=$root,target=/test,ro=true" \
-    --entrypoint /bin/sh docker.io/minio/mc:latest -ec \
+    --entrypoint /bin/sh docker.io/minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727 -ec \
     'mc alias set local http://127.0.0.1:9000 minioadmin minioadmin >/dev/null; exec mc "$@"' -- "$@"
 }
 run_image --mount "type=bind,source=$seed,target=/seed.parquet,ro=true" --entrypoint bash "$TILES_IMAGE" -ec \
