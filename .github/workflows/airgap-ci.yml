@@ -275,19 +275,19 @@ jobs:
           exit-code: "1"
 
       - name: Generate PMTiles proxy SBOM
-        uses: anchore/sbom-action@v0.24.0
+        uses: anchore/sbom-action@v0.24.2
         with:
           image: ${{ env.PROXY_IMAGE }}:sha-${{ steps.tags.outputs.short_sha }}
           output-file: sbom-proxy.spdx.json
 
       - name: Generate viewer SBOM
-        uses: anchore/sbom-action@v0.24.0
+        uses: anchore/sbom-action@v0.24.2
         with:
           image: ${{ env.VIEWER_IMAGE }}:sha-${{ steps.tags.outputs.short_sha }}
           output-file: sbom-viewer.spdx.json
 
       - name: Generate tile generator SBOM
-        uses: anchore/sbom-action@v0.24.0
+        uses: anchore/sbom-action@v0.24.2
         with:
           image: ${{ env.TILES_IMAGE }}:sha-${{ steps.tags.outputs.short_sha }}
           output-file: sbom-tiles.spdx.json
