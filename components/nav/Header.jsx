@@ -12,11 +12,10 @@ import GithubButton from "@/components/nav/GithubButton";
 import SearchBox from "@/components/nav/SearchBox";
 import ArticleOutlinedIcon from "@mui/icons-material/ArticleOutlined";
 import BugReportOutlinedIcon from "@mui/icons-material/BugReportOutlined";
-import FrameInspectOutlinedIcon from "@mui/icons-material/FindInPageOutlined";
 import PublicOutlinedIcon from "@mui/icons-material/PublicOutlined";
 import PropTypes from "prop-types";
 
-export default function Header({ zoom, mode, setMode, setZoom, visibleTypes, language, setLanguage, inspectMode, setInspectMode, globeMode, setGlobeMode, activeFeature, onGersSelect }) {
+export default function Header({ zoom, mode, setMode, setZoom, visibleTypes, language, setLanguage, globeMode, setGlobeMode, activeFeature, onGersSelect }) {
   const isDark = mode === "theme-dark";
 
   return (
@@ -50,7 +49,7 @@ export default function Header({ zoom, mode, setMode, setZoom, visibleTypes, lan
           </span>
         </Tooltip>
         <DownloadButton zoom={zoom} mode={mode} setZoom={setZoom} visibleTypes={visibleTypes} />
-        <ShareButton visibleTypes={visibleTypes} inspectMode={inspectMode} activeFeature={activeFeature} />
+        <ShareButton visibleTypes={visibleTypes} activeFeature={activeFeature} />
         <Tooltip title="Report a bug disabled offline">
           <span>
           <IconButton
@@ -66,21 +65,6 @@ export default function Header({ zoom, mode, setMode, setZoom, visibleTypes, lan
             <BugReportOutlinedIcon fontSize="small" />
           </IconButton>
           </span>
-        </Tooltip>
-        <Tooltip title="Toggle inspect mode">
-          <IconButton
-            onClick={() => setInspectMode(!inspectMode)}
-            aria-label="Toggle inspect mode"
-            sx={{
-              color: inspectMode ? "#fff" : "inherit",
-              bgcolor: inspectMode ? "primary.main" : "transparent",
-              "&:hover": {
-                bgcolor: inspectMode ? "primary.dark" : (isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)"),
-              },
-            }}
-          >
-            <FrameInspectOutlinedIcon fontSize="small" />
-          </IconButton>
         </Tooltip>
         <Tooltip title="Toggle globe view">
           <span>
@@ -116,8 +100,6 @@ Header.propTypes = {
   visibleTypes: PropTypes.array.isRequired,
   language: PropTypes.string.isRequired,
   setLanguage: PropTypes.func.isRequired,
-  inspectMode: PropTypes.bool.isRequired,
-  setInspectMode: PropTypes.func.isRequired,
   globeMode: PropTypes.bool.isRequired,
   setGlobeMode: PropTypes.func.isRequired,
   activeFeature: PropTypes.object,

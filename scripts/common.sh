@@ -7,8 +7,8 @@ REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 AIRGAP_COMPOSE_FILE="$REPO_ROOT/compose.airgap.yml"
 LOCAL_S3_COMPOSE_FILE="$REPO_ROOT/compose.local-s3.yml"
 LOCAL_S3_NETWORK="overture-airgap-s3"
-VIEWER_IMAGE="localhost/overture-explorer-airgap:local"
-TILES_IMAGE="localhost/overture-tiles-airgap:local"
+VIEWER_IMAGE="${VIEWER_IMAGE:-localhost/overture-explorer-airgap:local}"
+TILES_IMAGE="${TILES_IMAGE:-localhost/overture-tiles-airgap:local}"
 
 die() {
   printf 'Error: %s\n' "$*" >&2
@@ -41,13 +41,13 @@ require_rootless_podman() {
     || die "Podman is unavailable. Start the RHEL WSL distro and verify 'podman info'."
 
   [[ "$rootless" == "true" ]] \
-    || die "This project supports rootless Podman only. Run as your RHEL user without sudo."
+    || die "This RHEL workflow requires rootless Podman. Run as your RHEL user without sudo."
 }
 
 compose_local_s3() {
   local compose_bin
   compose_bin="$(podman_compose_bin)"
-  "$compose_bin" -f "$LOCAL_S3_COMPOSE_FILE" "$@"
+  PODMAN_COMPOSE_PROVIDER="$compose_bin" podman compose -f "$LOCAL_S3_COMPOSE_FILE" "$@"
 }
 
 require_local_image() {
