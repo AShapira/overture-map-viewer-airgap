@@ -9,6 +9,7 @@ LOCAL_S3_COMPOSE_FILE="$REPO_ROOT/compose.local-s3.yml"
 LOCAL_S3_NETWORK="overture-airgap-s3"
 VIEWER_IMAGE="${VIEWER_IMAGE:-localhost/overture-explorer-airgap:local}"
 TILES_IMAGE="${TILES_IMAGE:-localhost/overture-tiles-airgap:local}"
+PROXY_IMAGE="${PROXY_IMAGE:-localhost/overture-pmtiles-proxy-airgap:local}"
 
 die() {
   printf 'Error: %s\n' "$*" >&2

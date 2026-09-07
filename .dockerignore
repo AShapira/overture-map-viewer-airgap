@@ -9,3 +9,8 @@ data
 *.tmp
 compose.local-s3.yml
 compose.airgap.yml
+
+.env*
+**/credentials.json
+**/node_modules
+secrets

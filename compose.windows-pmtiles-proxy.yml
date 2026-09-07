@@ -1,0 +1,5 @@
+# Add AFTER compose.windows-airgap.yml and compose.pmtiles-proxy.yml.
+services:
+  catalog:
+    environment:
+      PMTILES_HTTP_BASE: "/pmtiles/${PROXY_PUBLICATION_ID:?Set a unique publication ID}/"

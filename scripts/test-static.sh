@@ -122,6 +122,8 @@ if rg -n -i -g '!test-static.sh' 'docker[[:space:]]+(build|compose|images|load|r
   die "Unsupported Docker local-runtime instructions remain."
 fi
 
+npm --prefix "$REPO_ROOT/airgap/pmtiles-proxy" test
+
 printf 'Running npm lint...\n'
 (cd "$REPO_ROOT" && npm run lint)
 

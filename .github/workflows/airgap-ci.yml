@@ -17,6 +17,7 @@ env:
   IMAGE_OWNER: ashapira
   VIEWER_IMAGE: ghcr.io/ashapira/overture-explorer-airgap
   TILES_IMAGE: ghcr.io/ashapira/overture-tiles-airgap
+  PROXY_IMAGE: ghcr.io/ashapira/overture-pmtiles-proxy-airgap
 
 jobs:
   app:
@@ -45,6 +46,11 @@ jobs:
 
       - name: Test
         run: npm test -- --runInBand
+
+      - name: Proxy and catalog tests
+        run: |
+          npm ci --prefix airgap/pmtiles-proxy --ignore-scripts
+          npm test --prefix airgap/pmtiles-proxy
 
       - name: Build
         run: npm run build
@@ -75,7 +81,7 @@ jobs:
           JSON
           npx playwright install chromium --with-deps
           npx serve@14.2.4 out --listen 18080 &
-          for i in {1..20}; do
+          for _attempt in {1..20}; do
             if curl -fsS http://127.0.0.1:18080/ >/dev/null; then
               break
             fi
@@ -137,20 +143,26 @@ jobs:
           short_sha="${GITHUB_SHA::7}"
           viewer_tags="${VIEWER_IMAGE}:sha-${short_sha}"
           tiles_tags="${TILES_IMAGE}:sha-${short_sha}"
+          proxy_tags="${PROXY_IMAGE}:sha-${short_sha}"
 
           if [[ "${GITHUB_REF_TYPE}" == "branch" && "${GITHUB_REF_NAME}" == "main" ]]; then
             viewer_tags="${viewer_tags},${VIEWER_IMAGE}:main"
             tiles_tags="${tiles_tags},${TILES_IMAGE}:main"
+            proxy_tags="${proxy_tags},${PROXY_IMAGE}:main"
           fi
 
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             viewer_tags="${viewer_tags},${VIEWER_IMAGE}:${GITHUB_REF_NAME}"
             tiles_tags="${tiles_tags},${TILES_IMAGE}:${GITHUB_REF_NAME}"
+            proxy_tags="${proxy_tags},${PROXY_IMAGE}:${GITHUB_REF_NAME}"
           fi
 
-          echo "short_sha=${short_sha}" >> "${GITHUB_OUTPUT}"
-          echo "viewer_tags=${viewer_tags}" >> "${GITHUB_OUTPUT}"
-          echo "tiles_tags=${tiles_tags}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "short_sha=${short_sha}"
+            echo "viewer_tags=${viewer_tags}"
+            echo "tiles_tags=${tiles_tags}"
+            echo "proxy_tags=${proxy_tags}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Build viewer image
         uses: docker/build-push-action@v7.3.0
@@ -176,6 +188,36 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.title=overture-tiles-airgap
 
+      - name: Build PMTiles proxy image
+        uses: docker/build-push-action@v7.3.0
+        with:
+          context: airgap/pmtiles-proxy
+          file: airgap/pmtiles-proxy/Dockerfile
+          load: true
+          tags: ${{ steps.tags.outputs.proxy_tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.title=overture-pmtiles-proxy-airgap
+
+      - name: Set up Node for private S3 acceptance
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: package.json
+
+      - name: Private S3 and browser acceptance
+        env:
+          CONTAINER_ENGINE: docker
+          PROXY_IMAGE: ${{ env.PROXY_IMAGE }}:sha-${{ steps.tags.outputs.short_sha }}
+          VIEWER_IMAGE: ${{ env.VIEWER_IMAGE }}:sha-${{ steps.tags.outputs.short_sha }}
+        run: |
+          npm ci --ignore-scripts
+          npm ci --prefix airgap/pmtiles-proxy --ignore-scripts
+          npx playwright install --with-deps chromium
+          docker pull docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+          docker pull docker.io/minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+          node airgap/pmtiles-proxy/test/integration.mjs
+
       - name: Viewer container hardening smoke test
         run: |
           mkdir -p ci-smoke/catalog ci-smoke/tiles/2026-04-15.0 ci-smoke/data/release/2026-04-15.0/theme=places/type=place
@@ -197,7 +239,7 @@ jobs:
             "${VIEWER_IMAGE}:sha-${{ steps.tags.outputs.short_sha }}"
 
           trap 'docker rm -f viewer-smoke' EXIT
-          for i in {1..20}; do
+          for _attempt in {1..20}; do
             if curl -fsS http://127.0.0.1:18081/ >/dev/null; then
               break
             fi
@@ -224,6 +266,20 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
 
+      - name: Scan PMTiles proxy image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.PROXY_IMAGE }}:sha-${{ steps.tags.outputs.short_sha }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Generate PMTiles proxy SBOM
+        uses: anchore/sbom-action@v0.24.0
+        with:
+          image: ${{ env.PROXY_IMAGE }}:sha-${{ steps.tags.outputs.short_sha }}
+          output-file: sbom-proxy.spdx.json
+
       - name: Generate viewer SBOM
         uses: anchore/sbom-action@v0.24.0
         with:
@@ -243,6 +299,7 @@ jobs:
           path: |
             sbom-viewer.spdx.json
             sbom-tiles.spdx.json
+            sbom-proxy.spdx.json
           if-no-files-found: error
 
       - name: Log in to GHCR
@@ -264,6 +321,11 @@ jobs:
 
           IFS=',' read -ra tiles_tags <<< "${{ steps.tags.outputs.tiles_tags }}"
           for tag in "${tiles_tags[@]}"; do
+            docker push "${tag}"
+          done
+
+          IFS=',' read -ra proxy_tags <<< "${{ steps.tags.outputs.proxy_tags }}"
+          for tag in "${proxy_tags[@]}"; do
             docker push "${tag}"
           done
 
@@ -290,6 +352,12 @@ jobs:
         uses: hadolint/hadolint-action@v3.4.0
         with:
           dockerfile: airgap/tile-generator/Dockerfile
+          failure-threshold: error
+
+      - name: Lint PMTiles proxy Dockerfile
+        uses: hadolint/hadolint-action@v3.4.0
+        with:
+          dockerfile: airgap/pmtiles-proxy/Dockerfile
           failure-threshold: error
 
       - name: Install Gitleaks

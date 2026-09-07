@@ -1,11 +1,14 @@
 # Overture Explorer Airgap
 
+For private PMTiles buckets, use the optional [PMTiles proxy](docs/private-pmtiles-proxy.md) with a dedicated read-only S3 identity.
+
 This repository packages the Overture Maps Explorer for a disconnected environment.
 
 The important split is:
 
 - `localhost/overture-explorer-airgap:local`: small static viewer container
 - `localhost/overture-tiles-airgap:local`: batch tile-generation container
+- `localhost/overture-pmtiles-proxy-airgap:local`: optional private-S3 PMTiles reader
 
 Local development and RHEL air-gap operations support rootless Podman on RHEL 10
 under WSL2. Windows production deployment uses native PowerShell and Podman Desktop

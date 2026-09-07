@@ -1,5 +1,7 @@
 # Air-Gap S3 Generation and Viewer Runbook
 
+For private PMTiles buckets, use the optional [PMTiles proxy](private-pmtiles-proxy.md) with a dedicated read-only S3 identity.
+
 This runbook generates configured Overture PMTiles sequentially with rootless
 Podman, publishes each completed archive immediately to internal S3, and serves
 it to browsers through a range-capable HTTP gateway. PMTiles are never retained
@@ -19,7 +21,8 @@ mounted GeoParquet or direct S3 ranged GeoParquet reads
   -> read-only viewer using an internal S3 HTTP gateway for PMTiles
 ```
 
-Only the generator receives S3 credentials. The viewer reads HTTPS URLs from
+In external-gateway deployments, only the generator receives S3 credentials.
+The optional private PMTiles proxy receives its own read-only credentials. The viewer reads HTTPS URLs from
 the generated catalogs.
 
 ## 2. Object Layout and Permissions

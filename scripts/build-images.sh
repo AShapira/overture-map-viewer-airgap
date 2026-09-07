@@ -21,4 +21,7 @@ podman build \
   -t "$TILES_IMAGE" \
   "$REPO_ROOT/airgap/tile-generator"
 
-printf 'Built %s and %s with rootless Podman.\n' "$VIEWER_IMAGE" "$TILES_IMAGE"
+printf 'Building the PMTiles proxy image...\n'
+podman build --format docker -t "$PROXY_IMAGE" "$REPO_ROOT/airgap/pmtiles-proxy"
+
+printf 'Built %s, %s and %s with rootless Podman.\n' "$VIEWER_IMAGE" "$TILES_IMAGE" "$PROXY_IMAGE"

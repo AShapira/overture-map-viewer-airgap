@@ -3,6 +3,26 @@ The Overture Explorer Site is an open source project. You can submit bug reports
 
 Please star our project on GitHub to show your support! ⭐️
 
+# airgap-v0.5.0
+#### 2026-Sep-07
+
+- Add an optional Node.js PMTiles proxy for private S3-compatible storage, with
+  dedicated read-only credentials, streamed byte ranges, HEAD, conditional
+  requests, CORS and publication-manifest restrictions.
+- Serve proxy URLs through the viewer's NGINX origin, and invalidate cached
+  PMTiles URLs when the publication or gateway changes.
+- Add Linux and native Windows Podman overrides, proxy readiness checks,
+  credential rotation/recreation guidance, and offline image packaging.
+- Build, scan, generate an SBOM for, and publish the proxy image alongside the
+  viewer and generator images. Include private-S3 and browser acceptance in CI.
+- Validation: proxy/configuration/catalog tests and existing viewer tests pass;
+  Linux private-S3 acceptance renders all six regional themes in an Israel view.
+  The proxy image scan has no fixable HIGH/CRITICAL findings.
+- Known limitation: native Windows end-to-end acceptance is pending because the
+  validation machine has local port-forwarding and container-DNS routing errors.
+  This is a local networking issue, not an internet dependency. The deployment
+  machine must pass the documented private-S3 acceptance test.
+
 <!--
 # A.B.C
 ##### YYYY-MMM-DD

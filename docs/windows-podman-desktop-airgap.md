@@ -1,5 +1,7 @@
 # Windows Podman Desktop air-gap runbook
 
+For private PMTiles buckets, use the optional [PMTiles proxy](private-pmtiles-proxy.md) with a dedicated read-only S3 identity.
+
 Run from a native Windows checkout in PowerShell. Podman Desktop owns a WSL2
 Podman machine; the operator workflow does not invoke a separate RHEL/Ubuntu
 distribution. Existing RHEL development workflows remain available.

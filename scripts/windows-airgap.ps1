@@ -109,13 +109,30 @@ $convert.WaitForExit()
 if ($convert.ExitCode -ne 0) { throw 'Could not parse the provider-rendered Compose configuration.' }
 $info = (Read-Podman @('info', '--format', 'json')) | ConvertFrom-Json
 $generator = $config.services.'tiles-generator'
-foreach ($service in @('tiles-generator', 'catalog', 'viewer')) {
+$proxyEnabled = $null -ne $config.services.PSObject.Properties['pmtiles-proxy']
+$servicesToCheck = @('tiles-generator', 'catalog', 'viewer')
+if ($proxyEnabled) { $servicesToCheck += 'pmtiles-proxy' }
+foreach ($service in $servicesToCheck) {
     Read-Podman @('image', 'inspect', '--format', '{{.Id}}', $config.services.$service.image) | Out-Null
 }
 $env:GENERATOR_IMAGE_ID = (Read-Podman @('image', 'inspect', '--format', '{{.Id}}', $generator.image)).Trim()
 foreach ($mount in $generator.volumes) {
     if ($mount.type -eq 'bind' -and -not (Test-Path -LiteralPath $mount.source -PathType Container)) {
         throw "Create the configured directory before running: $($mount.source)"
+    }
+}
+if ($proxyEnabled) {
+    $proxy = $config.services.'pmtiles-proxy'
+    foreach ($mount in $proxy.volumes) {
+        if ($mount.type -ne 'bind') { continue }
+        $kind = if ($mount.target -eq '/trust') { 'Container' } else { 'Leaf' }
+        if (-not (Test-Path -LiteralPath $mount.source -PathType $kind)) {
+            throw "Missing proxy bind source: $($mount.source)"
+        }
+    }
+    $expectedTileBase = '/pmtiles/' + $proxy.environment.PROXY_PUBLICATION_ID + '/'
+    if ($config.services.catalog.environment.PMTILES_HTTP_BASE -ne $expectedTileBase) {
+        throw 'Proxy deployment requires the Windows proxy catalog override or a matching PMTILES_HTTP_BASE.'
     }
 }
 # Separate Windows binds can expose the same host files under different Linux
@@ -153,6 +170,22 @@ switch ($Action) {
     'Catalog' { Invoke-Operation ($compose + @('run', '--rm', '--no-deps', '-T', 'catalog')) }
     'Viewer' {
         Invoke-Operation ($compose + @('run', '--rm', '--no-deps', '-T', 'catalog'))
-        Invoke-Operation ($compose + @('up', '-d', '--no-deps', 'viewer'))
+        if ($proxyEnabled) {
+            Invoke-Operation ($compose + @('up', '-d', '--no-deps', '--force-recreate', 'pmtiles-proxy'))
+            # --no-deps skips Compose dependency health checks; verify explicitly.
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 30; $attempt++) {
+                try {
+                    Read-Podman ($compose + @('exec', '-T', 'pmtiles-proxy', 'node', '-e', "fetch('http://127.0.0.1:8080/readyz',{signal:AbortSignal.timeout(6000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))")) | Out-Null
+                    $ready = $true
+                    break
+                } catch { Start-Sleep -Seconds 1 }
+            }
+            if (-not $ready) { throw 'PMTiles proxy is not ready; check its credentials, CA and publication configuration.' }
+        }
+        $viewerArguments = @('up', '-d', '--no-deps')
+        # NGINX resolves the upstream when it starts. Refresh it after proxy replacement.
+        if ($proxyEnabled) { $viewerArguments += '--force-recreate' }
+        Invoke-Operation ($compose + $viewerArguments + @('viewer'))
     }
 }

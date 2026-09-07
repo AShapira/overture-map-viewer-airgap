@@ -1,0 +1,47 @@
+# Add after compose.airgap.yml OR compose.windows-airgap.yml.
+services:
+  pmtiles-proxy:
+    image: "${PROXY_IMAGE:?Set PROXY_IMAGE to the imported proxy image}"
+    pull_policy: never
+    restart: unless-stopped
+    read_only: true
+    user: "1000:1000"
+    mem_limit: 512m
+    cpus: 1
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      PROXY_PUBLICATION_ID: "${PROXY_PUBLICATION_ID:?Set a unique publication ID}"
+      PROXY_S3_BUCKET: "${PROXY_S3_BUCKET:?Set the private PMTiles bucket}"
+      PROXY_S3_PREFIX: "${PROXY_S3_PREFIX:?Set the exact publication prefix including release}"
+      S3_ENDPOINT_URL: "${S3_ENDPOINT_URL:?Set S3_ENDPOINT_URL}"
+      S3_REGION: "${S3_REGION:?Set S3_REGION}"
+      PROXY_S3_FORCE_PATH_STYLE: "${PROXY_S3_FORCE_PATH_STYLE:-true}"
+      PROXY_CREDENTIALS_FILE: /run/proxy/credentials.json
+      PROXY_MANIFEST_FILE: /run/proxy/publication.json
+      PROXY_CORS_ORIGINS: "${PROXY_CORS_ORIGINS:-}"
+      NODE_EXTRA_CA_CERTS: "${PROXY_CA_BUNDLE:-}"
+      AWS_EC2_METADATA_DISABLED: "true"
+    volumes:
+      - type: bind
+        source: "${PROXY_CREDENTIALS_PATH:?Set the private credentials JSON file path}"
+        target: /run/proxy/credentials.json
+        read_only: true
+      - type: bind
+        source: "${PROXY_MANIFEST_PATH:?Set the publication manifest file path}"
+        target: /run/proxy/publication.json
+        read_only: true
+      - type: bind
+        source: "${S3_TRUST_DIR:?Set the CA directory (may be empty)}"
+        target: /trust
+        read_only: true
+    tmpfs: [/tmp]
+  viewer:
+    depends_on:
+      pmtiles-proxy:
+        condition: service_healthy
+    volumes:
+      - type: bind
+        source: ./airgap/nginx/pmtiles-proxy.conf
+        target: /etc/nginx/pmtiles-proxy/routes.conf
+        read_only: true

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import process from "node:process";
 
@@ -122,6 +123,9 @@ function main() {
   }
   const availableThemes = publication.themes;
   const now = new Date().toISOString();
+  // The browser caches theme URLs by the latest release URL. Include publication
+  // identity and tile base so changing a gateway or region invalidates that cache.
+  const revision = createHash("sha256").update(JSON.stringify({ publication, tileBase })).digest("hex").slice(0, 24);
 
   for (const theme of SUPPORTED_THEMES) {
     fs.rmSync(path.join(outDir, release, theme), { recursive: true, force: true });
@@ -135,7 +139,7 @@ function main() {
     description: "Local catalog generated for the airgapped Overture Explorer.",
     links: [
       { rel: "self", href: "./catalog.json", type: "application/json" },
-      { rel: "child", href: `./${release}/catalog.json`, type: "application/json", title: release, latest: true },
+      { rel: "child", href: `./${release}/catalog.json?v=${revision}`, type: "application/json", title: release, latest: true },
     ],
   };
 
