@@ -16,6 +16,8 @@ import initWasm from "@geoarrow/geoarrow-wasm/esm/index.js";
 import { getVisibleTypes } from "@/lib/LayerManager";
 import { downloadAsZip } from "@/lib/zipDownload";
 import { buildDownloadMetadata } from "@/lib/downloadMetadata";
+import { normalizeGeojson } from "@/lib/normalizeGeojson";
+import DownloadDialog from "@/components/nav/DownloadDialog";
 
 const DEFAULT_MIN_ZOOM = 15;
 function DownloadButton({ mode, zoom, setZoom, visibleTypes}) {
@@ -24,7 +26,11 @@ function DownloadButton({ mode, zoom, setZoom, visibleTypes}) {
   const [loading, setLoading] = useState(false);
   const [readyDownload, setReadyDownload] = useState(null);
   const [downloadMinZoom, setDownloadMinZoom] = useState(DEFAULT_MIN_ZOOM);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [pendingBbox, setPendingBbox] = useState(null);
+  const [zipName, setZipName] = useState(null);
   const readyDownloadRef = useRef(null);
+  const loadReqRef = useRef(0);
 
   const replaceReadyDownload = (download) => {
     if (readyDownloadRef.current?.revoke) {
@@ -53,8 +59,52 @@ function DownloadButton({ mode, zoom, setZoom, visibleTypes}) {
     }
   }, [map, setZoom]);
 
-  const handleDownloadClick = async () => {
+  // Fetches the release version in the background while the dialog is open
+  // in order to pre-compute the archive name. A request token guards against
+  // stale responses overwriting state when the dialog is cancelled and
+  // reopened before the previous fetch completes.
+  const loadDialogInfo = async (bbox) => {
+    const reqId = ++loadReqRef.current;
+    try {
+      const releaseVersion = await getLatestReleaseVersion();
+      if (reqId !== loadReqRef.current) return; // stale — a newer open superseded this one
+      const bboxStr = bbox.map((v) => v.toFixed(3)).join(",");
+      setZipName(`overture-${releaseVersion}-${bboxStr}.zip`);
+    } catch (err) {
+      console.error("Failed to load dialog info:", err);
+      // Leave zipName null — dialog degrades gracefully.
+    }
+  };
+
+  // Opens the confirmation dialog and captures the current bbox.
+  const handleDownloadClick = () => {
     if (!map) return;
+    const bounds = map.getBounds();
+    const bbox = [
+      bounds.getWest(),
+      bounds.getSouth(),
+      bounds.getEast(),
+      bounds.getNorth(),
+    ];
+    setPendingBbox(bbox);
+    setZipName(null);
+    setDialogOpen(true);
+    loadDialogInfo(bbox);
+  };
+
+  const handleDialogCancel = () => {
+    setDialogOpen(false);
+    setPendingBbox(null);
+  };
+
+  // Runs after user confirms in dialog.
+  const handleDialogConfirm = async () => {
+    setDialogOpen(false);
+
+    if (!map || !pendingBbox) return;
+
+    const bbox = pendingBbox;
+    setPendingBbox(null);
 
     //TODO: Make this async and parallelize with the startup of the map component, rather than blocking in.
     await initWasm();
@@ -62,15 +112,6 @@ function DownloadButton({ mode, zoom, setZoom, visibleTypes}) {
 
     setLoading(true);
     try {
-      //Get current map dimensions and convert to bbox
-      const bounds = map.getBounds();
-      let bbox = [
-        bounds.getWest(),  //xmin
-        bounds.getSouth(), //ymin
-        bounds.getEast(),  //xmax
-        bounds.getNorth(), //ymax
-      ];
-
       //Send those to the download engine
       const xmin = ["bbox", "xmin"];
       const ymin = ["bbox", "ymin"];
@@ -135,7 +176,9 @@ function DownloadButton({ mode, zoom, setZoom, visibleTypes}) {
 
         const files = nonEmptyTables.map((wasmTable) => ({
           name: `overture-${releaseVersion}-${wasmTable.type}-${bboxStr}.geojson`,
-          data: writeGeoJSON(wasmTable.reader),
+          // writeGeoJSON puts `id` inside properties and emits every polygon
+          // as a MultiPolygon; normalize to match the source data / CLI.
+          data: normalizeGeojson(writeGeoJSON(wasmTable.reader)),
         }));
 
         if (files.length === 0) {
@@ -209,6 +252,14 @@ function DownloadButton({ mode, zoom, setZoom, visibleTypes}) {
   return (
     <>
       {downloadIcon}
+      <DownloadDialog
+        open={dialogOpen}
+        onConfirm={handleDialogConfirm}
+        onCancel={handleDialogCancel}
+        visibleTypes={getVisibleTypes(visibleTypes)}
+        bbox={pendingBbox}
+        zipName={zipName}
+      />
       {readyDownload && (
         <div className="download-ready-link" role="status">
           <a href={readyDownload.url} download={readyDownload.filename}>

@@ -1,0 +1,5 @@
+# Retain the fork's Planetiler 0.10.2 dependency set until a compatible
+# upstream Planetiler release is adopted.
+GHSA-r7wm-3cxj-wff9
+CVE-2026-54512
+CVE-2026-54513

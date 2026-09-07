@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "profile_fingerprint": "87b2bb55377f279d4c3b275409e011de537dd54c94a0f09eee4fadb5aed60ee2",
+  "generation_settings": {
+    "planetiler_version": "0.10.2",
+    "compress_temp": true,
+    "mmap_temp": false,
+    "sort_readers": 1,
+    "sort_writers": 1,
+    "threads": 12
+  },
+  "provenance": {
+    "date": "2026-09-06",
+    "release": "2026-07-22.0",
+    "bbox": [
+      34.2,
+      29.4,
+      35.9,
+      33.4
+    ],
+    "runtime": "Native Windows PowerShell, Podman Desktop WSL2, 24 GiB limit, 12 CPUs",
+    "image_identity": "06a9bc241c56a9926a639e670c939935c83f0475781104bd1c37208a722dcdc8",
+    "source_fingerprint": "13715bfb6bf14d84f7bc9c7f294b8d54ae056731562dca7b4b5d9444f630db03",
+    "method": "Largest observed per-theme work/output ratios from the deterministic Israel pilot and completed Israel and Egypt-Turkey-Iran generation. Pilot selections cover low/median/high row count, spatial density, geometry bytes and compressed bytes per type; this is not a random statistical sample.",
+    "limitations": "Regional measurements are extrapolation inputs, not guaranteed bounds. Planning factor is 2.5 except divisions (4.0 after its initial Middle East conservative scratch estimate was exceeded). Missing statistics double the factor. Compatible pilot calibration retains at least this measured uncertainty floor. Addresses was truly empty in both regions and remains uncalibrated.",
+    "full_region_image_identity": "614cb5e0fa86ce4b86d46fc0196c036d35d5356a5c22f5a003c8891289006a9b",
+    "full_region_run_id": "20260906T042051Z-242824d4ad9d",
+    "additional_full_region": {
+      "name": "Egypt-Turkey-Iran",
+      "bbox": [
+        24.0,
+        22.0,
+        64.0,
+        43.0
+      ],
+      "image_identity": "609c58635aa2f810e5d49afc7cbdc9e9e2b4c241bc38144cce742a6e8673e855",
+      "source_fingerprint": "6f7d0242d520a0b21a0b7b9c3bbba241bbc630e4dca76f30838985271c5d45e4",
+      "run_id": "20260906T051931Z-7d9b950cdfd0",
+      "elapsed_seconds": 5054.562,
+      "capacity": {
+        "initial_local_bytes": 1048576,
+        "peak_local_bytes": 15941500928,
+        "peak_additional_local_bytes": 15940452352,
+        "initial_reported_allocated_bytes": 1048576,
+        "peak_reported_allocated_bytes": 15941500928,
+        "peak_newly_allocated_bytes": 15940452352,
+        "peak_theme_scratch_bytes": 3145728,
+        "peak_work_bytes": 0,
+        "minimum_free_bytes": {
+          "/scratch": 582882426880,
+          "/output": 586479042560
+        },
+        "sampling_interval_seconds": 0.5
+      }
+    }
+  },
+  "themes": {
+    "base": {
+      "work_per_input_byte": 1.2906429871774532,
+      "output_per_input_byte": 1.0837041173677808,
+      "uncertainty": 2.5,
+      "sample_input_bytes": 27960384,
+      "sample_work_peak_bytes": 35651584,
+      "sample_archive_bytes": 13532626,
+      "full_region_input_bytes": 151927151,
+      "full_region_work_peak_bytes": 196083712,
+      "full_region_archive_bytes": 126531020,
+      "middle_east_input_bytes": 4494478848,
+      "middle_east_work_peak_bytes": 5371854848,
+      "middle_east_archive_bytes": 4870685233,
+      "middle_east_scratch_peak_bytes": 10243538944
+    },
+    "buildings": {
+      "work_per_input_byte": 1.935369615422772,
+      "output_per_input_byte": 0.7743898190509809,
+      "uncertainty": 2.5,
+      "sample_input_bytes": 2167185,
+      "sample_work_peak_bytes": 4194304,
+      "sample_archive_bytes": 1678246,
+      "full_region_input_bytes": 349252054,
+      "full_region_work_peak_bytes": 356515840,
+      "full_region_archive_bytes": 246284485,
+      "middle_east_input_bytes": 8594743081,
+      "middle_east_work_peak_bytes": 8122269696,
+      "middle_east_archive_bytes": 5871135267,
+      "middle_east_scratch_peak_bytes": 13894680576
+    },
+    "places": {
+      "work_per_input_byte": 3.589796610053441,
+      "output_per_input_byte": 1.9824833440775238,
+      "uncertainty": 2.5,
+      "sample_input_bytes": 1168396,
+      "sample_work_peak_bytes": 4194304,
+      "sample_archive_bytes": 2083293,
+      "full_region_input_bytes": 28942685,
+      "full_region_work_peak_bytes": 77594624,
+      "full_region_archive_bytes": 54620467,
+      "middle_east_input_bytes": 367353565,
+      "middle_east_work_peak_bytes": 982515712,
+      "middle_east_archive_bytes": 728272324,
+      "middle_east_scratch_peak_bytes": 1707081728
+    },
+    "divisions": {
+      "work_per_input_byte": 13.267577816346725,
+      "output_per_input_byte": 5.42842519438931,
+      "uncertainty": 4.0,
+      "sample_input_bytes": 10841339,
+      "sample_work_peak_bytes": 56623104,
+      "sample_archive_bytes": 15438443,
+      "full_region_input_bytes": 11232787,
+      "full_region_work_peak_bytes": 35651584,
+      "full_region_archive_bytes": 16919780,
+      "middle_east_input_bytes": 171264433,
+      "middle_east_work_peak_bytes": 2272264192,
+      "middle_east_archive_bytes": 929696163,
+      "middle_east_scratch_peak_bytes": 3195011072
+    },
+    "transportation": {
+      "work_per_input_byte": 2.6697683695054857,
+      "output_per_input_byte": 1.564610130026078,
+      "uncertainty": 2.5,
+      "sample_input_bytes": 2356555,
+      "sample_work_peak_bytes": 6291456,
+      "sample_archive_bytes": 3195953,
+      "full_region_input_bytes": 216062912,
+      "full_region_work_peak_bytes": 429916160,
+      "full_region_archive_bytes": 285097133,
+      "middle_east_input_bytes": 4216047567,
+      "middle_east_work_peak_bytes": 9343860736,
+      "middle_east_archive_bytes": 6596470732,
+      "middle_east_scratch_peak_bytes": 15955132416
+    }
+  }
+}

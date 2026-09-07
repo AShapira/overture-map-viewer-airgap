@@ -3,8 +3,9 @@ import com.onthegomap.planetiler.Planetiler;
 import com.onthegomap.planetiler.Profile;
 import com.onthegomap.planetiler.config.Arguments;
 import com.onthegomap.planetiler.reader.SourceFeature;
-import com.onthegomap.planetiler.util.Glob;
 import com.onthegomap.planetiler.reader.parquet.ParquetFeature;
+import com.onthegomap.planetiler.reader.parquet.S3InputFiles;
+import com.onthegomap.planetiler.util.Glob;
 import org.apache.parquet.schema.MessageType;
 
 import java.nio.file.Path;
@@ -88,8 +89,18 @@ public class OvertureProfile implements Profile {
     }
 
     static void run(Arguments args, Theme theme) throws Exception {
-        Path base = args.inputFile("data", "overture base directory", Path.of("data", "overture"));
-        var paths = Glob.of(base).resolve("theme=" + theme.name(), "*", "*.parquet").find();
+        String data = args.getString("data", "overture base directory or s3 URI", Path.of("data", "overture").toString());
+        if (data.startsWith("s3://")) {
+            try (var source = S3InputFiles.open(data, theme.name())) {
+                run(args, theme, source.paths());
+            }
+        } else {
+            Path base = args.inputFile("data", "overture base directory", Path.of(data));
+            run(args, theme, Glob.of(base).resolve("theme=" + theme.name(), "*", "*.parquet").find());
+        }
+    }
+
+    private static void run(Arguments args, Theme theme, List<Path> paths) throws Exception {
         Planetiler.create(args)
                 .setProfile(new OvertureProfile(theme))
                 .addParquetSource("overture",
@@ -97,7 +108,7 @@ public class OvertureProfile implements Profile {
                         true, // hive-partitioning
                         fields -> fields.get("id"), // hash the ID field to generate unique long IDs
                         fields -> fields.get("type")) // extract "type={}" from the filename to get layer
-                .overwriteOutput(Path.of("data", theme.name() + ".pmtiles"))
+                .overwriteOutput(args.file("output", "output PMTiles archive", Path.of("data", theme.name() + ".pmtiles")))
                 .run();
     }
 }
