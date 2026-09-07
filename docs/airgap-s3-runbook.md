@@ -1,315 +1,238 @@
-# Air-Gapped S3 Runbook
+# Air-Gap S3 Generation and Viewer Runbook
 
-This manual describes how to set up the Overture tile generator, create PMTiles
-and preserved GeoParquet for a selected area or the whole world, publish the
-result to S3-compatible storage, and run the static viewer in a fully
-air-gapped network.
+This runbook generates configured Overture PMTiles sequentially with rootless
+Podman, publishes each completed archive immediately to internal S3, and serves
+it to browsers through a range-capable HTTP gateway. PMTiles are never retained
+in a local output volume.
 
-The workflow assumes:
-
-- Overture GeoParquet is already available in an internal S3-compatible object
-  store.
-- Generated PMTiles, preserved filtered GeoParquet, and STAC catalog files are
-  stored in internal S3-compatible storage.
-- The viewer is static and only reads HTTP-accessible files. It does not read
-  `s3://` URIs directly.
-- Any required container images, Node dependencies, source code, and Overture
-  data have already been transferred into the air-gapped network.
-
-## 1. Architecture
-
-Use these components:
-
-1. S3-compatible object storage, for example MinIO, Ceph RGW, Dell ECS, or an
-   internal appliance.
-2. Tile generator container: `overture-tiles-airgap`.
-3. Static viewer container: `overture-explorer-airgap`.
-4. Optional internal HTTP gateway or reverse proxy in front of S3.
-
-The normal data flow is:
+## 1. Data Flow
 
 ```text
-S3 GeoParquet source
-  -> tile generator
-  -> local generator output
-  -> S3 generated output bucket
-  -> viewer host sync or S3 HTTP gateway
-  -> browser
+mounted GeoParquet or direct S3 ranged GeoParquet reads
+  -> rootless one-shot tile-generator
+  -> monitored local scratch folder
+  -> one completed theme archive
+  -> upload and streamed SHA-256 and byte-size verification in S3
+  -> immediate local deletion
+  -> publication manifest after all configured themes succeed
+  -> local catalog/config and optional preserved GeoParquet
+  -> read-only viewer using an internal S3 HTTP gateway for PMTiles
 ```
 
-The viewer needs these URLs to work:
+Only the generator receives S3 credentials. The viewer reads HTTPS URLs from
+the generated catalogs.
 
-```text
-/catalog/catalog.json
-/tiles/<release>/<theme>.pmtiles
-/data/release/<release>/theme=<theme>/type=<type>/<file>.parquet
-/config/viewer-config.json
-```
+## 2. Object Layout and Permissions
 
-You can provide those paths in either of two ways:
-
-- Recommended for simple air-gapped deployments: sync the generated S3 objects
-  to local read-only directories on the viewer host and mount them into the
-  viewer container.
-- Alternative: expose S3 objects through an internal HTTP gateway that supports
-  byte-range requests and CORS, then configure the viewer and catalog with
-  absolute internal HTTP URLs.
-
-## 2. Required Object Layout
-
-The source GeoParquet bucket must preserve the Overture release layout:
+Source keys must preserve the release layout:
 
 ```text
 s3://<source-bucket>/<source-prefix>/<release>/theme=<theme>/type=<type>/<file>.parquet
 ```
 
-Example:
+Generated archives use:
 
 ```text
-s3://overture-source/release/2026-04-15.0/theme=places/type=place/part-00000.parquet
+s3://<output-bucket>/<pmtiles-prefix>/<release>/<theme>.pmtiles
 ```
 
-The generator `SOURCE_PATH` points at the release root, not at a theme:
+The generator identity needs list/read access to source keys and list/read/write
+access only to the generated prefix. The HTTP gateway must support `GET`, `HEAD`,
+CORS from the viewer origin, and byte ranges returning HTTP `206`.
+
+## 3. Validate Rootless Podman and Images
+
+```bash
+podman info --format 'rootless={{.Host.Security.Rootless}}'
+podman image exists localhost/overture-tiles-airgap:local
+podman image exists localhost/overture-explorer-airgap:local
+```
+
+The first command must report `rootless=true`. Import verified OCI archives into
+the disconnected environment before continuing.
+
+## 4. Configure the Run
+
+```bash
+export RELEASE=2026-04-15.0
+export THEMES=base,buildings,places,divisions,transportation,addresses
+export BBOX=
+export SOURCE_PATH=s3://overture-source/release/$RELEASE
+export PMTILES_S3_PATH=s3://overture-generated/pmtiles/release/$RELEASE
+export PMTILES_HTTP_BASE=https://s3-gateway.internal/overture-generated/pmtiles/release/$RELEASE/
+export PMTILES_SCRATCH_DIR=/path/to/large-local-scratch
+export PMTILES_MIN_FREE_GB=100
+export PMTILES_MAX_SCRATCH_GB=95
+export PRESERVE_PARQUET=false
+export PMTILES_MAX_LOCAL_GB=100
+export PLANETILER_SORT_MAX_READERS=1
+export PLANETILER_SORT_MAX_WRITERS=1
+export PLANETILER_COMPRESS_TEMP=true
+export PLANETILER_MMAP_TEMP=false
+
+export S3_ENDPOINT_URL=https://s3.internal
+export S3_REGION=us-east-1
+export AWS_ACCESS_KEY_ID=replace-with-access-key
+export AWS_SECRET_ACCESS_KEY=replace-with-secret-key
+```
+
+`THEMES` is an ordered comma-separated subset of `base`, `buildings`, `places`,
+`divisions`, `transportation`, and `addresses`. It defaults to all six. The old
+singular `THEME` variable is rejected.
+
+`BBOX` is `min_lon,min_lat,max_lon,max_lat`; leave it empty for whole-world
+generation. `PMTILES_MIN_FREE_GB` is a safety reserve, not an estimate of total
+required storage. `PMTILES_MAX_SCRATCH_GB` is an optional per-theme ceiling;
+`PMTILES_MAX_LOCAL_GB` counts the combined scratch/output footprint, including
+older retained files. Both are sampled twice per second and can briefly
+overshoot before shutdown. Leave headroom beyond the configured ceiling.
+S3 input is range-read directly, so
+scratch needs to fit Planetiler temporary files and the final archive, not a
+second copy of the source GeoParquet.
+
+`PLANETILER_COMPRESS_TEMP=true` and `PLANETILER_MMAP_TEMP=false` are the
+recommended S3 settings. Compression trades CPU time for substantially less
+feature-store space. `PRESERVE_PARQUET=false` is required when the goal is no
+local GeoParquet payload; setting it to `true` exports selected records directly
+into bounded partitions in the durable output area after generation. See the
+[storage model and estimator](../README.md#processing-storage-and-capacity-planning)
+before selecting limits.
+
+Protect credentials in the operator environment and shell history. Use a
+site-approved protected environment file when appropriate.
+
+## 5. Verify Exact Source Keys
+
+Define a helper that passes credentials only to short-lived generator
+containers:
+
+```bash
+podman_s3() {
+  podman run --rm \
+    -e AWS_ACCESS_KEY_ID \
+    -e AWS_SECRET_ACCESS_KEY \
+    -e AWS_REGION="$S3_REGION" \
+    -e S3_REGION \
+    -e S3_ENDPOINT_URL \
+    "$@"
+}
+```
+
+Check every configured theme:
+
+```bash
+IFS=, read -ra configured_themes <<< "$THEMES"
+for theme in "${configured_themes[@]}"; do
+  podman_s3 \
+    --entrypoint s5cmd \
+    localhost/overture-tiles-airgap:local \
+    ls "${SOURCE_PATH%/}/theme=$theme/type=*/*.parquet"
+done
+```
+
+Do not continue until each configured prefix contains the expected data.
+
+## 6. Generate and Publish in One Stage
+
+For S3 input:
+
+```bash
+mkdir -p "$PMTILES_SCRATCH_DIR" "$PWD/airgap-output"
+
+podman_s3 \
+  -e RELEASE \
+  -e THEMES \
+  -e BBOX \
+  -e SOURCE_PATH \
+  -e PMTILES_S3_PATH \
+  -e PMTILES_MIN_FREE_GB \
+  -e PMTILES_MAX_SCRATCH_GB \
+  -e PMTILES_MAX_LOCAL_GB \
+  -e PLANETILER_SORT_MAX_READERS \
+  -e PLANETILER_SORT_MAX_WRITERS \
+  -e PRESERVE_PARQUET \
+  -e PLANETILER_COMPRESS_TEMP \
+  -e PLANETILER_MMAP_TEMP \
+  -e PMTILES_SCRATCH_ROOT=/scratch \
+  -e OUTPUT=/output \
+  --mount "type=bind,source=$PMTILES_SCRATCH_DIR,target=/scratch" \
+  --mount "type=bind,source=$PWD/airgap-output,target=/output" \
+  localhost/overture-tiles-airgap:local
+```
+
+For a mounted release, also mount it read-only and set
+`SOURCE_PATH=/input/release`:
+
+```bash
+podman_s3 \
+  -e RELEASE \
+  -e THEMES \
+  -e BBOX \
+  -e SOURCE_PATH=/input/release \
+  -e PMTILES_S3_PATH \
+  -e PMTILES_MIN_FREE_GB \
+  -e PMTILES_MAX_SCRATCH_GB \
+  -e PMTILES_MAX_LOCAL_GB \
+  -e PRESERVE_PARQUET \
+  -e PMTILES_SCRATCH_ROOT=/scratch \
+  -e OUTPUT=/output \
+  --mount "type=bind,source=$OVERTURE_RELEASE_DIR,target=/input/release,ro=true" \
+  --mount "type=bind,source=$PMTILES_SCRATCH_DIR,target=/scratch" \
+  --mount "type=bind,source=$PWD/airgap-output,target=/output" \
+  localhost/overture-tiles-airgap:local
+```
+
+The job processes themes sequentially. It monitors free space and combined local
+usage twice per second while child processes run, reports the observed peak,
+verifies each uploaded object's SHA-256 and byte size, and deletes the local archive before
+starting the next theme. The ceiling is fail-safe: it stops the run and does not
+automatically spill Planetiler's mutable temp files into S3.
+
+On generation or capacity failure, incomplete current-theme scratch is removed.
+On upload or verification failure, the completed archive is retained at:
 
 ```text
-SOURCE_PATH=s3://overture-source/release/2026-04-15.0
+<scratch>/<release>/<unique-run-id>/<theme>/<theme>.pmtiles
 ```
 
-The generated output should use this layout:
+The success marker is `airgap-output/publication/<release>.json`. Previous
+publication state is preserved until a complete new run succeeds. Use a fresh
+S3 destination prefix for each generation; existing PMTiles are never overwritten.
 
-```text
-s3://<output-bucket>/tiles/<release>/<theme>.pmtiles
-s3://<output-bucket>/data/release/<release>/theme=<theme>/type=<type>/filtered.parquet
-s3://<output-bucket>/catalog/catalog.json
-s3://<output-bucket>/catalog/<release>/catalog.json
-s3://<output-bucket>/catalog/<release>/<theme>/catalog.json
-s3://<output-bucket>/catalog/<release>/manifest.geojson
+The Compose wrapper provides the same workflow:
+
+```bash
+THEMES="$THEMES" \
+PMTILES_S3_PATH="$PMTILES_S3_PATH" \
+PMTILES_SCRATCH_DIR="$PMTILES_SCRATCH_DIR" \
+PMTILES_MIN_FREE_GB="$PMTILES_MIN_FREE_GB" \
+PMTILES_MAX_SCRATCH_GB="$PMTILES_MAX_SCRATCH_GB" \
+PLANETILER_COMPRESS_TEMP="$PLANETILER_COMPRESS_TEMP" \
+PLANETILER_MMAP_TEMP="$PLANETILER_MMAP_TEMP" \
+S3_REGION="$S3_REGION" \
+S3_ENDPOINT_URL="$S3_ENDPOINT_URL" \
+AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
+AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+podman-compose -f compose.airgap.yml --profile generate run --rm -T tiles-generator
 ```
 
-## 3. Preload Images For Air Gap
+## 7. Generate the Catalog
 
-Build or pull these images in a connected environment:
+The catalog reads the publication manifest rather than scanning local PMTiles:
 
-```powershell
-docker build -f Dockerfile.viewer -t overture-explorer-airgap:local .
-docker build -t overture-tiles-airgap:local .\airgap\tile-generator
+```bash
+node ./scripts/generate-airgap-catalog.mjs \
+  --release "$RELEASE" \
+  --publication-manifest "$PWD/airgap-output/publication/$RELEASE.json" \
+  --data-dir "$PWD/airgap-output/data/release/$RELEASE" \
+  --out-dir "$PWD/airgap-output/catalog" \
+  --tile-base "$PMTILES_HTTP_BASE"
 ```
 
-Export them:
+Add `--bbox "$BBOX"` for a bounded run. The command rejects a BBOX that does
+not match the publication manifest.
 
-```powershell
-docker save overture-explorer-airgap:local -o overture-explorer-airgap.local.tar
-docker save overture-tiles-airgap:local -o overture-tiles-airgap.local.tar
-```
-
-Transfer the tar files into the air-gapped network, then import them:
-
-```powershell
-docker load -i .\overture-explorer-airgap.local.tar
-docker load -i .\overture-tiles-airgap.local.tar
-```
-
-Confirm both images are present:
-
-```powershell
-docker images overture-explorer-airgap
-docker images overture-tiles-airgap
-```
-
-## 4. Define Environment Values
-
-Choose release, storage, and area values before generating tiles.
-
-Example PowerShell variables:
-
-```powershell
-$env:RELEASE = "2026-04-15.0"
-$env:S3_ENDPOINT_URL = "http://minio.internal:9000"
-$env:AWS_ACCESS_KEY_ID = "overture-generator"
-$env:AWS_SECRET_ACCESS_KEY = "replace-with-internal-secret"
-$env:AWS_REGION = "us-east-1"
-
-$env:SOURCE_PATH = "s3://overture-source/release/$env:RELEASE"
-$env:OUTPUT_BUCKET = "s3://overture-generated"
-$env:LOCAL_OUTPUT = "$PWD\airgap-output"
-```
-
-For a bounded area, define a BBOX in:
-
-```text
-min_lon,min_lat,max_lon,max_lat
-```
-
-Example Israel smoke area:
-
-```powershell
-$env:BBOX = "34.17,29.45,35.91,33.38"
-```
-
-For whole-world generation, do not set `BBOX`.
-
-## 5. Verify S3 Access By Key
-
-Before running the generator, verify that the container can access the exact
-GeoParquet keys.
-
-Run a key listing from the tile generator image:
-
-```powershell
-docker run --rm `
-  -e AWS_ACCESS_KEY_ID=$env:AWS_ACCESS_KEY_ID `
-  -e AWS_SECRET_ACCESS_KEY=$env:AWS_SECRET_ACCESS_KEY `
-  -e AWS_REGION=$env:AWS_REGION `
-  -e S3_ENDPOINT_URL=$env:S3_ENDPOINT_URL `
-  --entrypoint s5cmd `
-  overture-tiles-airgap:local `
-  ls "$env:SOURCE_PATH/theme=places/type=place/*.parquet"
-```
-
-Run a metadata check on one exact object key:
-
-```powershell
-docker run --rm `
-  -e AWS_ACCESS_KEY_ID=$env:AWS_ACCESS_KEY_ID `
-  -e AWS_SECRET_ACCESS_KEY=$env:AWS_SECRET_ACCESS_KEY `
-  -e AWS_REGION=$env:AWS_REGION `
-  -e S3_ENDPOINT_URL=$env:S3_ENDPOINT_URL `
-  --entrypoint s5cmd `
-  overture-tiles-airgap:local `
-  head "s3://overture-source/release/$env:RELEASE/theme=places/type=place/part-00000.parquet"
-```
-
-Do not continue until object access works by exact key.
-
-## 6. Generate Tiles For A Desired Area
-
-Generate one theme at a time. This keeps memory, disk, and failure recovery
-manageable.
-
-Supported themes:
-
-```text
-addresses
-base
-buildings
-divisions
-places
-transportation
-```
-
-Create a local output directory:
-
-```powershell
-New-Item -ItemType Directory -Force -Path $env:LOCAL_OUTPUT | Out-Null
-```
-
-Run one bounded-area theme:
-
-```powershell
-docker run --rm `
-  -e RELEASE=$env:RELEASE `
-  -e THEME=places `
-  -e BBOX=$env:BBOX `
-  -e SOURCE_PATH=$env:SOURCE_PATH `
-  -e OUTPUT=/output `
-  -e PRESERVE_PARQUET=true `
-  -e S3_REGION=$env:AWS_REGION `
-  -e AWS_REGION=$env:AWS_REGION `
-  -e AWS_ACCESS_KEY_ID=$env:AWS_ACCESS_KEY_ID `
-  -e AWS_SECRET_ACCESS_KEY=$env:AWS_SECRET_ACCESS_KEY `
-  -e S3_ENDPOINT_URL=$env:S3_ENDPOINT_URL `
-  -v "${env:LOCAL_OUTPUT}:/output" `
-  overture-tiles-airgap:local
-```
-
-Repeat for the remaining themes by changing `THEME`.
-
-Expected local output after one theme:
-
-```text
-airgap-output/
-  tiles/<release>/places.pmtiles
-  data/release/<release>/theme=places/type=place/filtered.parquet
-```
-
-Check that output files are non-empty:
-
-```powershell
-Get-Item "$env:LOCAL_OUTPUT\tiles\$env:RELEASE\places.pmtiles"
-Get-ChildItem -Recurse "$env:LOCAL_OUTPUT\data\release\$env:RELEASE\theme=places" -Filter *.parquet
-```
-
-## 7. Generate Whole-World Tiles
-
-Whole-world generation uses the same command without `BBOX`.
-
-Important operating rules:
-
-- Run one theme at a time.
-- Use large persistent local scratch and output storage.
-- Keep `PRESERVE_PARQUET=true` only if the viewer must support browser-side
-  downloads from local filtered parquet. For whole-world data this can require
-  very large storage.
-- Expect long runtimes for large themes such as `base`, `buildings`, and
-  `transportation`.
-- Do not run whole-world generation inside the viewer container.
-
-Example whole-world run for `places`:
-
-```powershell
-docker run --rm `
-  -e RELEASE=$env:RELEASE `
-  -e THEME=places `
-  -e SOURCE_PATH=$env:SOURCE_PATH `
-  -e OUTPUT=/output `
-  -e PRESERVE_PARQUET=true `
-  -e S3_REGION=$env:AWS_REGION `
-  -e AWS_REGION=$env:AWS_REGION `
-  -e AWS_ACCESS_KEY_ID=$env:AWS_ACCESS_KEY_ID `
-  -e AWS_SECRET_ACCESS_KEY=$env:AWS_SECRET_ACCESS_KEY `
-  -e S3_ENDPOINT_URL=$env:S3_ENDPOINT_URL `
-  -v "${env:LOCAL_OUTPUT}:/output" `
-  overture-tiles-airgap:local
-```
-
-Repeat for each required theme.
-
-## 8. Generate The Local Catalog
-
-After all selected themes have been generated, create the catalog consumed by
-the viewer.
-
-For a bounded area:
-
-```powershell
-node .\scripts\generate-airgap-catalog.mjs `
-  --release $env:RELEASE `
-  --tiles-dir "$env:LOCAL_OUTPUT\tiles\$env:RELEASE" `
-  --data-dir "$env:LOCAL_OUTPUT\data\release\$env:RELEASE" `
-  --out-dir "$env:LOCAL_OUTPUT\catalog" `
-  --bbox $env:BBOX `
-  --tile-base "/tiles/$env:RELEASE/"
-```
-
-For whole world, omit `--bbox`:
-
-```powershell
-node .\scripts\generate-airgap-catalog.mjs `
-  --release $env:RELEASE `
-  --tiles-dir "$env:LOCAL_OUTPUT\tiles\$env:RELEASE" `
-  --data-dir "$env:LOCAL_OUTPUT\data\release\$env:RELEASE" `
-  --out-dir "$env:LOCAL_OUTPUT\catalog" `
-  --tile-base "/tiles/$env:RELEASE/"
-```
-
-If you will serve PMTiles through an internal S3 HTTP gateway instead of local
-viewer mounts, set `--tile-base` to the internal HTTP base URL:
-
-```powershell
---tile-base "https://s3-gateway.internal/overture-generated/tiles/$env:RELEASE/"
-```
-
-Expected catalog output:
+Confirm these files exist:
 
 ```text
 airgap-output/catalog/catalog.json
@@ -318,69 +241,12 @@ airgap-output/catalog/<release>/manifest.geojson
 airgap-output/catalog/<release>/<theme>/catalog.json
 ```
 
-## 9. Upload Generated Output To S3
+Each theme catalog must link to
+`<PMTILES_HTTP_BASE>/<theme>.pmtiles`.
 
-Sync the generated output to the internal output bucket.
+## 8. Configure and Run the Viewer
 
-```powershell
-docker run --rm `
-  -e AWS_ACCESS_KEY_ID=$env:AWS_ACCESS_KEY_ID `
-  -e AWS_SECRET_ACCESS_KEY=$env:AWS_SECRET_ACCESS_KEY `
-  -e AWS_REGION=$env:AWS_REGION `
-  -e S3_ENDPOINT_URL=$env:S3_ENDPOINT_URL `
-  -v "${env:LOCAL_OUTPUT}:/output:ro" `
-  --entrypoint s5cmd `
-  overture-tiles-airgap:local `
-  sync "/output/tiles/*" "$env:OUTPUT_BUCKET/tiles/"
-```
-
-```powershell
-docker run --rm `
-  -e AWS_ACCESS_KEY_ID=$env:AWS_ACCESS_KEY_ID `
-  -e AWS_SECRET_ACCESS_KEY=$env:AWS_SECRET_ACCESS_KEY `
-  -e AWS_REGION=$env:AWS_REGION `
-  -e S3_ENDPOINT_URL=$env:S3_ENDPOINT_URL `
-  -v "${env:LOCAL_OUTPUT}:/output:ro" `
-  --entrypoint s5cmd `
-  overture-tiles-airgap:local `
-  sync "/output/data/*" "$env:OUTPUT_BUCKET/data/"
-```
-
-```powershell
-docker run --rm `
-  -e AWS_ACCESS_KEY_ID=$env:AWS_ACCESS_KEY_ID `
-  -e AWS_SECRET_ACCESS_KEY=$env:AWS_SECRET_ACCESS_KEY `
-  -e AWS_REGION=$env:AWS_REGION `
-  -e S3_ENDPOINT_URL=$env:S3_ENDPOINT_URL `
-  -v "${env:LOCAL_OUTPUT}:/output:ro" `
-  --entrypoint s5cmd `
-  overture-tiles-airgap:local `
-  sync "/output/catalog/*" "$env:OUTPUT_BUCKET/catalog/"
-```
-
-Verify uploaded output:
-
-```powershell
-docker run --rm `
-  -e AWS_ACCESS_KEY_ID=$env:AWS_ACCESS_KEY_ID `
-  -e AWS_SECRET_ACCESS_KEY=$env:AWS_SECRET_ACCESS_KEY `
-  -e AWS_REGION=$env:AWS_REGION `
-  -e S3_ENDPOINT_URL=$env:S3_ENDPOINT_URL `
-  --entrypoint s5cmd `
-  overture-tiles-airgap:local `
-  ls "$env:OUTPUT_BUCKET/tiles/$env:RELEASE/*.pmtiles"
-```
-
-## 10. Configure Viewer Files
-
-Create or edit `public/config/viewer-config.json` before building the viewer,
-or mount a runtime replacement at:
-
-```text
-/usr/share/nginx/html/config/viewer-config.json
-```
-
-For local mounted files:
+Use a runtime config such as:
 
 ```json
 {
@@ -399,250 +265,58 @@ For local mounted files:
 }
 ```
 
-For an internal HTTP gateway in front of S3:
+Run the viewer without a local PMTiles mount:
 
-```json
-{
-  "stacCatalogUrl": "https://s3-gateway.internal/overture-generated/catalog/catalog.json",
-  "downloadBaseUrl": "https://s3-gateway.internal/overture-generated/data/release/2026-04-15.0/",
-  "releaseId": "2026-04-15.0",
-  "geocoderBaseUrl": null,
-  "features": {
-    "search": false,
-    "download": true,
-    "externalDocs": false
-  },
-  "download": {
-    "minZoom": 15
-  }
-}
+```bash
+podman run -d \
+  --name overture-viewer \
+  --read-only \
+  --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  -p 8088:8080 \
+  --mount "type=bind,source=$PWD/airgap-output/catalog,target=/usr/share/nginx/html/catalog,ro=true" \
+  --mount "type=bind,source=$PWD/airgap-output/data,target=/usr/share/nginx/html/data,ro=true" \
+  --mount "type=bind,source=$PWD/public/config/viewer-config.json,target=/usr/share/nginx/html/config/viewer-config.json,ro=true" \
+  --tmpfs /tmp \
+  --tmpfs /var/cache/nginx \
+  --tmpfs /var/run \
+  localhost/overture-explorer-airgap:local
 ```
 
-Requirements for an S3 HTTP gateway:
+## 9. Validate and Test
 
-- It must support HTTP `Range` requests for `.pmtiles`.
-- It must serve `.pmtiles`, `.parquet`, `.json`, and `.geojson` files.
-- It must allow browser access from the viewer origin with CORS headers.
-- It must not require internet access.
-
-## 11. Run Viewer With Synced Local Data
-
-This is the simplest production shape for a fully air-gapped network.
-
-First, sync generated objects from S3 to the viewer host:
-
-```powershell
-$viewerRoot = "$PWD\viewer-data"
-New-Item -ItemType Directory -Force -Path $viewerRoot | Out-Null
+```bash
+curl -fsS http://127.0.0.1:8088/config/viewer-config.json >/dev/null
+curl -fsS http://127.0.0.1:8088/catalog/catalog.json >/dev/null
+curl -fsS http://127.0.0.1:8088/catalog/$RELEASE/manifest.geojson >/dev/null
+curl -fsS --range 0-1023 "${PMTILES_HTTP_BASE%/}/places.pmtiles" >/dev/null
 ```
 
-```powershell
-docker run --rm `
-  -e AWS_ACCESS_KEY_ID=$env:AWS_ACCESS_KEY_ID `
-  -e AWS_SECRET_ACCESS_KEY=$env:AWS_SECRET_ACCESS_KEY `
-  -e AWS_REGION=$env:AWS_REGION `
-  -e S3_ENDPOINT_URL=$env:S3_ENDPOINT_URL `
-  -v "${viewerRoot}:/viewer-data" `
-  --entrypoint s5cmd `
-  overture-tiles-airgap:local `
-  sync "$env:OUTPUT_BUCKET/catalog/*" "/viewer-data/catalog/"
+The PMTiles response must be `206`, all configured themes must appear in the
+catalog, and no local PMTiles files should remain after a successful run.
+
+The repository's isolated MinIO validation exercises exact source keys, capacity
+rejection, streamed checksums, deliberate write-denied retention across two
+runs, schema-preserving downloads, publication-manifest catalogs, HTTP 206/CORS,
+and viewer startup. Supply a bounded places fixture intersecting
+`34.75,32.03,34.85,32.13`; each test creates its own store and retains evidence:
+
+```bash
+SEED_PARQUET=/path/to/place.parquet ./scripts/test-local-s3-generator.sh
+SEED_PARQUET=/path/to/place.parquet ./scripts/validate-airgap-s3-runbook.sh
 ```
 
-```powershell
-docker run --rm `
-  -e AWS_ACCESS_KEY_ID=$env:AWS_ACCESS_KEY_ID `
-  -e AWS_SECRET_ACCESS_KEY=$env:AWS_SECRET_ACCESS_KEY `
-  -e AWS_REGION=$env:AWS_REGION `
-  -e S3_ENDPOINT_URL=$env:S3_ENDPOINT_URL `
-  -v "${viewerRoot}:/viewer-data" `
-  --entrypoint s5cmd `
-  overture-tiles-airgap:local `
-  sync "$env:OUTPUT_BUCKET/tiles/*" "/viewer-data/tiles/"
-```
+## 10. Troubleshooting and Operations
 
-```powershell
-docker run --rm `
-  -e AWS_ACCESS_KEY_ID=$env:AWS_ACCESS_KEY_ID `
-  -e AWS_SECRET_ACCESS_KEY=$env:AWS_SECRET_ACCESS_KEY `
-  -e AWS_REGION=$env:AWS_REGION `
-  -e S3_ENDPOINT_URL=$env:S3_ENDPOINT_URL `
-  -v "${viewerRoot}:/viewer-data" `
-  --entrypoint s5cmd `
-  overture-tiles-airgap:local `
-  sync "$env:OUTPUT_BUCKET/data/*" "/viewer-data/data/"
-```
-
-Run the viewer:
-
-```powershell
-docker run -d `
-  --name overture-viewer `
-  --read-only `
-  --cap-drop ALL `
-  --security-opt no-new-privileges:true `
-  -p 8088:8080 `
-  -v "${viewerRoot}\catalog:/usr/share/nginx/html/catalog:ro" `
-  -v "${viewerRoot}\tiles:/usr/share/nginx/html/tiles:ro" `
-  -v "${viewerRoot}\data:/usr/share/nginx/html/data:ro" `
-  -v "$PWD\public\config\viewer-config.json:/usr/share/nginx/html/config/viewer-config.json:ro" `
-  --tmpfs /tmp `
-  --tmpfs /var/cache/nginx `
-  --tmpfs /var/run `
-  overture-explorer-airgap:local
-```
-
-Open the viewer from inside the air-gapped network:
-
-```text
-http://<viewer-host>:8088
-```
-
-## 12. Run Viewer With An S3 HTTP Gateway
-
-Use this mode only if the S3-compatible storage is exposed through an internal
-HTTP endpoint that supports browser-safe access.
-
-Generate the catalog with an absolute `--tile-base`:
-
-```powershell
-node .\scripts\generate-airgap-catalog.mjs `
-  --release $env:RELEASE `
-  --tiles-dir "$env:LOCAL_OUTPUT\tiles\$env:RELEASE" `
-  --data-dir "$env:LOCAL_OUTPUT\data\release\$env:RELEASE" `
-  --out-dir "$env:LOCAL_OUTPUT\catalog" `
-  --bbox $env:BBOX `
-  --tile-base "https://s3-gateway.internal/overture-generated/tiles/$env:RELEASE/"
-```
-
-Set `viewer-config.json` with absolute HTTP URLs:
-
-```json
-{
-  "stacCatalogUrl": "https://s3-gateway.internal/overture-generated/catalog/catalog.json",
-  "downloadBaseUrl": "https://s3-gateway.internal/overture-generated/data/release/2026-04-15.0/",
-  "releaseId": "2026-04-15.0",
-  "geocoderBaseUrl": null,
-  "features": {
-    "search": false,
-    "download": true,
-    "externalDocs": false
-  },
-  "download": {
-    "minZoom": 15
-  }
-}
-```
-
-Run the viewer without mounting catalog, tiles, or data:
-
-```powershell
-docker run -d `
-  --name overture-viewer `
-  --read-only `
-  --cap-drop ALL `
-  --security-opt no-new-privileges:true `
-  -p 8088:8080 `
-  -v "$PWD\public\config\viewer-config.json:/usr/share/nginx/html/config/viewer-config.json:ro" `
-  --tmpfs /tmp `
-  --tmpfs /var/cache/nginx `
-  --tmpfs /var/run `
-  overture-explorer-airgap:local
-```
-
-## 13. Validate The Deployment
-
-From a machine inside the air-gapped network, verify the viewer endpoints:
-
-```powershell
-Invoke-WebRequest http://<viewer-host>:8088/config/viewer-config.json
-Invoke-WebRequest http://<viewer-host>:8088/catalog/catalog.json
-Invoke-WebRequest http://<viewer-host>:8088/catalog/$env:RELEASE/manifest.geojson
-```
-
-Verify PMTiles byte-range support:
-
-```powershell
-Invoke-WebRequest `
-  -Uri "http://<viewer-host>:8088/tiles/$env:RELEASE/places.pmtiles" `
-  -Headers @{ Range = "bytes=0-1023" }
-```
-
-Expected result:
-
-- HTTP status is `206 Partial Content` for byte-range requests, or the client
-  otherwise receives a valid ranged response.
-- The browser loads the map.
-- The layer tree shows generated themes.
-- Panning and zooming request `.pmtiles` files.
-- Download visible layers requests `.parquet` files under
-  `/data/release/<release>/`.
-
-This repository also includes an automated validation harness for the manual.
-It uses local MinIO as the S3-compatible source and output store, then runs the
-same bounded-area `places` workflow described above:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\validate-airgap-s3-runbook.ps1
-```
-
-The script validates:
-
-- exact GeoParquet key access in `s3://overture-source`
-- tile generation from S3-compatible input
-- catalog generation
-- upload to `s3://overture-generated`
-- sync from generated S3 output to viewer data directories
-- viewer startup
-- viewer config, catalog, manifest, PMTiles, and range-request HTTP probes
-
-Use `-KeepServices` to leave MinIO and the validation viewer running:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\validate-airgap-s3-runbook.ps1 -KeepServices
-```
-
-## 14. Troubleshooting
-
-If S3 reads fail:
-
-- Confirm `S3_ENDPOINT_URL`, access key, secret key, and region are set.
-- Confirm the object key layout starts at `theme=<theme>/type=<type>/`.
-- Run `s5cmd head` on one exact parquet key.
-
-If the generator finds no features:
-
-- Check the BBOX order: `min_lon,min_lat,max_lon,max_lat`.
-- Confirm the BBOX intersects the source data.
-- Confirm the source parquet includes the `bbox` struct used by the filter.
-
-If the viewer opens but the map is blank:
-
-- Fetch `/catalog/catalog.json` in the browser.
-- Fetch the release catalog and one theme catalog.
-- Confirm each theme catalog has a `rel="pmtiles"` link.
-- Confirm the linked `.pmtiles` URL is reachable from the browser.
-- Confirm the HTTP server or gateway supports byte-range reads.
-
-If downloads fail:
-
-- Fetch `/catalog/<release>/manifest.geojson`.
-- Confirm `downloadBaseUrl` ends with `/data/release/<release>/`.
-- Confirm parquet files exist under the paths listed in `manifest.geojson`.
-
-If air-gapped builds fail:
-
-- Do not build images inside the air gap unless all package repositories and
-  dependency artifacts are mirrored internally.
-- Build images in a connected environment, export them with `docker save`, and
-  import them with `docker load`.
-
-## 15. Operational Notes
-
-- Keep generator credentials out of the viewer container.
-- The viewer only needs read access to static files.
-- Use one release prefix per Overture release.
-- Use one output bucket or prefix per generated deployment.
-- Keep bounded-area and whole-world outputs separate.
-- For whole-world runs, monitor local disk, object-store throughput, memory, and
-  runtime per theme.
-- Regenerate the catalog after adding or removing generated themes.
+- If capacity validation fails, provision more local scratch space or reduce the
+  BBOX. Do not lower the reserve merely to bypass the guard.
+- If an upload fails, retain the reported completed archive while correcting
+  endpoint, region, certificate, or policy settings.
+- If catalog generation fails, confirm the publication manifest exists and
+  matches the requested release and BBOX.
+- If the viewer is blank, fetch a catalog and its PMTiles URL directly and
+  verify CORS plus byte-range behavior.
+- Keep generator credentials out of the viewer and catalog processes.
+- Use a distinct generated prefix per release or independently managed run.
+- Record image digests, release, BBOX, ordered themes, capacity floor, remote
+  object sizes, and HTTP `206` evidence.

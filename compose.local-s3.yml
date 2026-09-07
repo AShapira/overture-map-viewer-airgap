@@ -1,6 +1,6 @@
 services:
   minio:
-    image: minio/minio:latest
+    image: docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -12,7 +12,7 @@ services:
       - minio-data:/data
 
   s3-seed:
-    image: overture-tiles-airgap:local
+    image: localhost/overture-tiles-airgap:local
     depends_on:
       - minio
     entrypoint: bash
@@ -38,7 +38,7 @@ services:
       - ./airgap-output/data/release/2026-04-15.0/theme=places/type=place/filtered.parquet:/seed/filtered.parquet:ro
 
   s3-key-check:
-    image: overture-tiles-airgap:local
+    image: localhost/overture-tiles-airgap:local
     depends_on:
       - minio
     entrypoint: s5cmd
@@ -51,17 +51,41 @@ services:
       AWS_REGION: us-east-1
       S3_ENDPOINT_URL: http://minio:9000
 
-  tiles-israel-places-s3:
-    image: overture-tiles-airgap:local
+  s3-public-read:
+    image: docker.io/minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    depends_on:
+      - minio
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        mc alias set local http://minio:9000 minioadmin minioadmin
+        mc anonymous set download local/overture-generated/pmtiles
+
+  tiles-smoke-places-s3:
+    logging:
+      driver: none
+    image: localhost/overture-tiles-airgap:local
     depends_on:
       - minio
     environment:
       RELEASE: "2026-04-15.0"
-      THEME: "places"
-      BBOX: "34.17,29.45,35.91,33.38"
+      THEMES: "places"
+      BBOX: "${BBOX:-}"
       SOURCE_PATH: "s3://overture-local/release/2026-04-15.0"
+      PMTILES_S3_PATH: "s3://overture-local/pmtiles/release/2026-04-15.0"
+      PMTILES_SCRATCH_ROOT: /scratch
+      PMTILES_MIN_FREE_GB: "1"
+      PMTILES_MAX_SCRATCH_GB: "95"
+      PMTILES_MAX_LOCAL_GB: "${PMTILES_MAX_LOCAL_GB:-}"
+      PLANETILER_THREADS: "${PLANETILER_THREADS:-12}"
+      PLANETILER_SORT_MAX_READERS: "${PLANETILER_SORT_MAX_READERS:-1}"
+      PLANETILER_SORT_MAX_WRITERS: "${PLANETILER_SORT_MAX_WRITERS:-1}"
+      GENERATOR_IMAGE_ID: "${GENERATOR_IMAGE_ID:-not-provided}"
       OUTPUT: "/output"
-      PRESERVE_PARQUET: "true"
+      PRESERVE_PARQUET: "false"
+      PLANETILER_COMPRESS_TEMP: "true"
+      PLANETILER_MMAP_TEMP: "false"
       S3_REGION: "us-east-1"
       AWS_ACCESS_KEY_ID: "minioadmin"
       AWS_SECRET_ACCESS_KEY: "minioadmin"
@@ -69,6 +93,11 @@ services:
       S3_ENDPOINT_URL: "http://minio:9000"
     volumes:
       - ./airgap-output/s3-smoke:/output
+      - ./airgap-output/s3-smoke/scratch:/scratch
 
 volumes:
   minio-data:
+
+networks:
+  default:
+    name: overture-airgap-s3

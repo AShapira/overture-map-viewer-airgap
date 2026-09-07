@@ -17,7 +17,7 @@
     "test:ci": "jest --ci --passWithNoTests",
     "test:a11y": "node --test --test-reporter=spec __tests__/a11y.test.mjs",
     "preview": "npx serve out",
-    "airgap:catalog:israel": "node scripts/generate-airgap-catalog.mjs --release 2026-04-15.0 --tiles-dir airgap-output/tiles/2026-04-15.0 --data-dir airgap-output/data/release/2026-04-15.0 --out-dir airgap-output/catalog --bbox 34.17,29.45,35.91,33.38 --tile-base /tiles/2026-04-15.0/"
+    "airgap:catalog:smoke": "node scripts/generate-airgap-catalog.mjs --release 2026-04-15.0 --publication-manifest airgap-output/publication/2026-04-15.0.json --data-dir airgap-output/data/release/2026-04-15.0 --out-dir airgap-output/catalog --tile-base ${PMTILES_HTTP_BASE:-http://127.0.0.1:9000/overture-local/pmtiles/release/2026-04-15.0/}"
   },
   "dependencies": {
     "@emotion/react": "^11.11.4",
@@ -56,6 +56,6 @@
     "playwright": "^1.50.0"
   },
   "volta": {
-    "node": "20.11.1"
+    "node": "24.20.0"
   }
 }

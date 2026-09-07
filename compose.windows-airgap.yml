@@ -1,0 +1,151 @@
+x-podman:
+  in_pod: false
+
+services:
+  tiles-generator:
+    profiles: ["generate"]
+    image: "${TILES_IMAGE:?Set TILES_IMAGE to the Artifactory tile-generator image}"
+    pull_policy: never
+    restart: "no"
+    mem_limit: "${GENERATOR_MEMORY:-24g}"
+    cpus: "${GENERATOR_CPUS:-12}"
+    logging:
+      driver: none
+    env_file:
+      - "${AIRGAP_ENV_FILE:-.env.windows-airgap}"
+    environment:
+      RELEASE: "${OVERTURE_RELEASE:?Set OVERTURE_RELEASE}"
+      THEMES: "${THEMES:-base,buildings,places,divisions,transportation,addresses}"
+      BBOX: "${BBOX:-}"
+      SOURCE_PATH: "s3://${S3_BUCKET:?Set S3_BUCKET}/${SOURCE_RELEASE_PREFIX:-release}/${OVERTURE_RELEASE:?Set OVERTURE_RELEASE}"
+      PMTILES_S3_PATH: "s3://${S3_BUCKET:?Set S3_BUCKET}/${PMTILES_RELEASE_PREFIX:-pmtiles/release}/${OVERTURE_RELEASE:?Set OVERTURE_RELEASE}"
+      PMTILES_SCRATCH_ROOT: /scratch
+      PMTILES_ACCOUNTING_ROOT: "${PMTILES_ACCOUNTING_ROOT:-}"
+      PMTILES_MIN_FREE_GB: "${PMTILES_MIN_FREE_GB:?Set PMTILES_MIN_FREE_GB}"
+      PMTILES_MAX_SCRATCH_GB: "${PMTILES_MAX_SCRATCH_GB:-95}"
+      PMTILES_MAX_LOCAL_GB: "${PMTILES_MAX_LOCAL_GB:-}"
+      PLANETILER_THREADS: "${PLANETILER_THREADS:-12}"
+      PLANETILER_SORT_MAX_READERS: "${PLANETILER_SORT_MAX_READERS:-1}"
+      PLANETILER_SORT_MAX_WRITERS: "${PLANETILER_SORT_MAX_WRITERS:-1}"
+      GENERATOR_IMAGE_ID: "${GENERATOR_IMAGE_ID:-not-provided}"
+      OUTPUT: /output
+      PRESERVE_PARQUET: "${PRESERVE_PARQUET:-false}"
+      PLANETILER_COMPRESS_TEMP: "${PLANETILER_COMPRESS_TEMP:-true}"
+      PLANETILER_MMAP_TEMP: "${PLANETILER_MMAP_TEMP:-false}"
+      S3_REGION: "${S3_REGION:?Set S3_REGION}"
+      AWS_REGION: "${S3_REGION:?Set S3_REGION}"
+      S3_ENDPOINT_URL: "${S3_ENDPOINT_URL:?Set S3_ENDPOINT_URL}"
+      AWS_EC2_METADATA_DISABLED: "true"
+      AWS_CA_BUNDLE: "${AWS_CA_BUNDLE:-}"
+      JAVA_TOOL_OPTIONS: "${JAVA_TOOL_OPTIONS:-}"
+    volumes:
+      - type: bind
+        source: "${OUTPUT_DIR:?Set OUTPUT_DIR to the local state directory}"
+        target: /output
+      - type: bind
+        source: "${PMTILES_SCRATCH_DIR:?Set PMTILES_SCRATCH_DIR to a local folder with sufficient capacity}"
+        target: /scratch
+      - type: bind
+        source: "${S3_TRUST_DIR:?Set S3_TRUST_DIR to a directory containing site CA files}"
+        target: /trust
+        read_only: true
+    security_opt:
+      - no-new-privileges:true
+
+  catalog:
+    image: "${CATALOG_IMAGE:?Set CATALOG_IMAGE to the Artifactory Node runtime image}"
+    pull_policy: never
+    restart: "no"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      RELEASE: "${OVERTURE_RELEASE:?Set OVERTURE_RELEASE}"
+      BBOX: "${BBOX:-}"
+      DOWNLOAD_MIN_ZOOM: "${DOWNLOAD_MIN_ZOOM:-15}"
+      PMTILES_HTTP_BASE: "${PMTILES_HTTP_BASE:?Set PMTILES_HTTP_BASE to the browser-accessible PMTiles release URL}"
+    entrypoint:
+      - /bin/sh
+      - -euc
+    command:
+      - |
+        if [ -n "$$BBOX" ]; then
+          node /app/generate-airgap-catalog.mjs \
+            --release "$$RELEASE" \
+            --publication-manifest "/output/publication/$$RELEASE.json" \
+            --data-dir "/output/data/release/$$RELEASE" \
+            --out-dir /output/catalog \
+            --bbox "$$BBOX" \
+            --tile-base "$$PMTILES_HTTP_BASE"
+        else
+          node /app/generate-airgap-catalog.mjs \
+            --release "$$RELEASE" \
+            --publication-manifest "/output/publication/$$RELEASE.json" \
+            --data-dir "/output/data/release/$$RELEASE" \
+            --out-dir /output/catalog \
+            --tile-base "$$PMTILES_HTTP_BASE"
+        fi
+
+        node -e '
+          const fs = require("node:fs");
+          const release = process.env.RELEASE;
+          const minZoom = Number(process.env.DOWNLOAD_MIN_ZOOM);
+          if (!Number.isInteger(minZoom) || minZoom < 0 || minZoom > 24) {
+            throw new Error("DOWNLOAD_MIN_ZOOM must be an integer from 0 through 24");
+          }
+          const config = {
+            stacCatalogUrl: "/catalog/catalog.json",
+            downloadBaseUrl: `/data/release/$${release}/`,
+            releaseId: release,
+            geocoderBaseUrl: null,
+            features: { search: false, download: true, externalDocs: false },
+            download: { minZoom },
+          };
+          fs.mkdirSync("/output/config", { recursive: true });
+          fs.mkdirSync("/output/data", { recursive: true });
+          fs.writeFileSync("/output/config/viewer-config.json", `$${JSON.stringify(config, null, 2)}\n`);
+        '
+    volumes:
+      - type: bind
+        source: ./scripts/generate-airgap-catalog.mjs
+        target: /app/generate-airgap-catalog.mjs
+        read_only: true
+      - type: bind
+        source: "${OUTPUT_DIR:?Set OUTPUT_DIR}"
+        target: /output
+    tmpfs:
+      - /tmp
+
+  viewer:
+    image: "${VIEWER_IMAGE:?Set VIEWER_IMAGE to the Artifactory viewer image}"
+    pull_policy: never
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      catalog:
+        condition: service_completed_successfully
+    ports:
+      - "${VIEWER_PORT:-8088}:8080"
+    volumes:
+      - type: bind
+        source: "${OUTPUT_DIR:?Set OUTPUT_DIR}/data"
+        target: /usr/share/nginx/html/data
+        read_only: true
+      - type: bind
+        source: "${OUTPUT_DIR:?Set OUTPUT_DIR}/catalog"
+        target: /usr/share/nginx/html/catalog
+        read_only: true
+      - type: bind
+        source: "${OUTPUT_DIR:?Set OUTPUT_DIR}/config"
+        target: /usr/share/nginx/html/config
+        read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /var/run

@@ -1,113 +1,120 @@
-# Airgapped Overture Explorer Design
+# Air-Gapped Overture Explorer Design
 
 ## Goal
 
-Run the Overture Maps Explorer in a disconnected network while preserving the two important workflows:
+Run the Overture Maps Explorer in a disconnected network while preserving two
+workflows:
 
 - view Overture data from generated PMTiles
 - download visible data as GeoJSON ZIP files from local parquet
 
-The always-on viewer is intentionally static and small. Tile generation is a separate batch image because it needs Java, DuckDB, S3 tooling, large temporary storage, and broader filesystem access.
+The local development and RHEL operator environment is RHEL 10 on WSL2 with
+rootless Podman. Production images can also run on Podman Desktop for Windows
+with the separate `compose.windows-airgap.yml` workflow. The always-on viewer
+remains small and static; tile generation is a separate batch image because it
+needs Java, DuckDB, S3 tooling, temporary storage, and broader filesystem access.
 
 ## Components
 
 ### Viewer image
 
-`Dockerfile.viewer` builds the Next.js static export and serves it with `nginxinc/nginx-unprivileged:stable-alpine` on port `8080`.
+`Dockerfile.viewer` builds the Next.js static export and serves it with
+`nginxinc/nginx-unprivileged` on port `8080`.
 
 Runtime properties:
 
 - non-root nginx user
 - no server-side application runtime
-- read-only container in Compose
-- dropped Linux capabilities in Compose
-- static files only
-- runtime config from `/config/viewer-config.json`
-- configurable download zoom gate via `download.minZoom`
+- read-only container in `compose.airgap.yml`
+- all Linux capabilities dropped and `no-new-privileges` enabled
+- only nginx runtime paths backed by tmpfs
+- runtime config mounted at `/config/viewer-config.json`
+- configurable download zoom gate through `download.minZoom`
+- synchronized Explore/Inspect split view backed by the same published PMTiles
+- confirmation-before-download with a persistent browser fallback link
 
-The viewer no longer requires public STAC, public Overture S3, Google Fonts, or the public geocoder. Search is disabled unless an internal geocoder URL is configured.
+The viewer does not require public STAC, public Overture S3, Google Fonts, or a
+public geocoder. Search stays disabled unless an internal geocoder is configured.
+The default URL has no `mode` query parameter and opens at the split position;
+`mode=explore` and `mode=inspect` select the corresponding full-map view.
 
 ### Tile generator image
 
-`airgap/tile-generator/Dockerfile` packages the upstream Overture Planetiler profiles with DuckDB and `s5cmd`.
-It uses a current Ubuntu-based JRE image, builds `s5cmd` from source with a current Go toolchain, and patches the shaded `io.airlift:aircompressor` classes in `planetiler.jar` to the fixed version until Planetiler ships that dependency upstream.
+`airgap/tile-generator/Dockerfile` packages the Overture Planetiler profiles,
+DuckDB, and `s5cmd`. Its Ubuntu-based JDK and Alpine build stage are container
+internals and do not impose host package-manager requirements on RHEL.
 
 Input modes:
 
-- mounted filesystem release, for example `/input/release/theme=places/type=place/*.parquet`
-- S3-compatible source using `SOURCE_PATH=s3://bucket/path`
+- a release bind-mounted at `/input/release`
+- S3-compatible input selected with `SOURCE_PATH=s3://bucket/path`; GeoParquet
+  payloads are read with seekable HTTP range requests and are not copied into
+  local scratch
 
-For S3-compatible input, object keys under the bucket path must preserve the
-release layout expected by the generator:
+The default source mount is `./data/release/2026-04-15.0`. Override it through
+`OVERTURE_RELEASE_DIR`.
+
+S3 keys below the release root must preserve this layout:
 
 ```text
 theme=<theme>/type=<type>/<file>.parquet
 ```
 
-The local S3 smoke test uses MinIO and verifies this exact key before running
-the generator:
+Run the local MinIO smoke test with:
 
-```text
-s3://overture-local/release/2026-04-15.0/theme=places/type=place/filtered.parquet
+```bash
+./scripts/test-local-s3-generator.sh
 ```
 
-Run it with:
+### Local catalog
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\test-local-s3-generator.ps1
-```
-
-Output layout:
+`scripts/generate-airgap-catalog.mjs` creates the STAC-compatible catalogs and
+download manifest from a successful publication manifest. Local metadata uses:
 
 ```text
 airgap-output/
-  tiles/<release>/<theme>.pmtiles
-  data/release/<release>/theme=<theme>/type=<type>/filtered.parquet
+  data/release/<release>/theme=<theme>/type=<type>/part-*.parquet
+  publication/<release>.json
   catalog/catalog.json
   catalog/<release>/catalog.json
   catalog/<release>/<theme>/catalog.json
   catalog/<release>/manifest.geojson
 ```
 
-### Local catalog
-
-`scripts/generate-airgap-catalog.mjs` creates a small STAC-compatible catalog with the fields the viewer already consumes:
-
-- root catalog with the latest release link
-- release catalog with theme children
-- per-theme catalogs with `rel="pmtiles"`
-- `manifest.geojson` for browser-side downloads
-
-The manifest points downloads at the local parquet paths under `/data/release/<release>/`.
-
 ## Data Flow
 
-1. Copy or mount an Overture release into the airgapped environment.
-2. Run the tile generator for each selected theme and BBOX.
-3. Generate the local catalog.
-4. Start the viewer container.
-5. The browser loads:
-   - `/catalog/catalog.json`
-   - `/tiles/<release>/<theme>.pmtiles`
-   - `/data/release/<release>/.../*.parquet` when the user downloads visible data
+1. Mount an Overture release or configure an internal S3 source.
+2. Run one generator job for the ordered `THEMES` configuration, using rootless
+   Podman on RHEL or the operator-selected Podman Desktop connection on Windows.
+3. For each theme, generate in compressed, monitored local scratch, upload and
+   verify its S3 object, then delete the local PMTiles archive.
+4. Write a publication manifest only after all configured themes succeed.
+5. Generate the local catalog from that manifest.
+6. Start the read-only viewer. The browser reads PMTiles from an internal
+   range-capable HTTP gateway and catalogs/download parquet from configured
+   local or internal endpoints.
 
-## Israel Smoke Region
+The browser renders synchronized Explore and Inspect maps. This can increase
+client GPU and memory use and generate PMTiles requests for both styles, while
+the nginx viewer remains a static range-capable file server. Capacity testing
+must therefore cover representative browser hardware as well as server egress.
 
-The default smoke BBOX is:
+A bounded smoke run receives its site-approved BBOX from the operator. Full-world
+generation uses the same image without `BBOX`. The generator always processes
+themes sequentially and uses a configured free-space floor to protect its local
+scratch filesystem. PMTiles are not accumulated in a local output volume.
 
-```text
-34.17,29.45,35.91,33.38
-```
+## Security and Host Integration
 
-This covers Israel plus nearby border/coastal context and is small enough for repeatable local testing.
-
-## Full-World Mode
-
-Full-world generation uses the same image without `BBOX`. It should be run one theme at a time with large persistent scratch and output volumes. Do not run full-world generation inside the viewer container.
-
-## Security Notes
-
-- The viewer has no write access except tmpfs locations needed by nginx.
-- The viewer does not need cloud credentials.
-- The generator is the only component that should receive S3 credentials, and only when using S3-compatible input or output.
-- Release bundles should include image tarballs, checksums, SBOM/provenance where available, and this runbook.
+- The RHEL workflow requires rootless Podman; its project scripts reject
+  rootful execution. The Windows production workflow uses Podman Desktop Linux
+  containers and imported Artifactory images as documented separately.
+- The viewer receives no cloud credentials and only read-only data mounts.
+- Only the generator receives S3 credentials; catalog and viewer use the
+  credential-free PMTiles HTTP gateway.
+- The MinIO validation network is explicitly named `overture-airgap-s3`.
+- WSL has SELinux disabled, so Windows-mounted source data uses no relabel flag.
+  Native enforcing RHEL deployments must select `:z` or `:Z` deliberately on a
+  Linux filesystem.
+- Release bundles should include OCI image archives, checksums, SBOM/provenance
+  where available, and the operational runbook.

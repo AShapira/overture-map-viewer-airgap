@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
-const THEMES = ["base", "buildings", "places", "divisions", "transportation", "addresses"];
+const SUPPORTED_THEMES = new Set(["base", "buildings", "places", "divisions", "transportation", "addresses"]);
 
 function parseArgs(argv) {
   const args = {};
@@ -33,6 +33,39 @@ function normalizeUrlBase(value) {
   return value.endsWith("/") ? value : `${value}/`;
 }
 
+function readPublicationManifest(file, release) {
+  const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+  if (manifest.schema_version !== 1) throw new Error("Unsupported publication manifest schema_version");
+  if (manifest.release !== release) throw new Error("Publication manifest release does not match --release");
+  if (!Array.isArray(manifest.themes) || manifest.themes.length === 0) {
+    throw new Error("Publication manifest must contain at least one theme");
+  }
+  if (!Array.isArray(manifest.bbox) || manifest.bbox.length !== 4 || manifest.bbox.some((value) => !Number.isFinite(value))) {
+    throw new Error("Publication manifest bbox must contain four numbers");
+  }
+
+  const seen = new Set();
+  for (const theme of manifest.themes) {
+    if (!SUPPORTED_THEMES.has(theme)) throw new Error(`Unsupported published theme: ${theme}`);
+    if (seen.has(theme)) throw new Error(`Duplicate published theme: ${theme}`);
+    seen.add(theme);
+  }
+
+  if (!Array.isArray(manifest.objects) || manifest.objects.length !== manifest.themes.length) {
+    throw new Error("Publication manifest objects do not match themes");
+  }
+  for (const [index, object] of manifest.objects.entries()) {
+    const theme = manifest.themes[index];
+    if (object?.theme !== theme || object?.filename !== `${theme}.pmtiles` ||
+        typeof object?.uri !== "string" || !object.uri.endsWith(`/${theme}.pmtiles`) ||
+        !Number.isSafeInteger(object?.size) || object.size <= 0) {
+      throw new Error(`Invalid publication object for theme: ${theme}`);
+    }
+  }
+
+  return manifest;
+}
+
 function parseBbox(value) {
   if (!value) return [-180, -90, 180, 90];
   const bbox = value.split(",").map(Number);
@@ -40,6 +73,10 @@ function parseBbox(value) {
     throw new Error("--bbox must be four comma-separated numbers");
   }
   return bbox;
+}
+
+function sameBbox(left, right) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function listParquetFiles(dataDir) {
@@ -73,14 +110,22 @@ function listParquetFiles(dataDir) {
 function main() {
   const args = parseArgs(process.argv);
   const release = required(args, "release");
-  const tilesDir = path.resolve(required(args, "tiles-dir"));
+  const publicationManifest = path.resolve(required(args, "publication-manifest"));
   const dataDir = path.resolve(required(args, "data-dir"));
   const outDir = path.resolve(required(args, "out-dir"));
-  const tileBase = normalizeUrlBase(args["tile-base"] || `/tiles/${release}/`);
-  const bbox = parseBbox(args.bbox);
+  const tileBase = normalizeUrlBase(required(args, "tile-base"));
 
-  const availableThemes = THEMES.filter((theme) => fs.existsSync(path.join(tilesDir, `${theme}.pmtiles`)));
+  const publication = readPublicationManifest(publicationManifest, release);
+  const bbox = parseBbox(publication.bbox?.join(","));
+  if (args.bbox && !sameBbox(parseBbox(args.bbox), bbox)) {
+    throw new Error("Publication manifest bbox does not match --bbox");
+  }
+  const availableThemes = publication.themes;
   const now = new Date().toISOString();
+
+  for (const theme of SUPPORTED_THEMES) {
+    fs.rmSync(path.join(outDir, release, theme), { recursive: true, force: true });
+  }
 
   const rootCatalog = {
     stac_version: "1.0.0",
