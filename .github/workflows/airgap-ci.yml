@@ -165,7 +165,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Build viewer image
-        uses: docker/build-push-action@v7.3.0
+        uses: docker/build-push-action@v7.4.0
         with:
           context: .
           file: Dockerfile.viewer
@@ -177,7 +177,7 @@ jobs:
             org.opencontainers.image.title=overture-explorer-airgap
 
       - name: Build tile generator image
-        uses: docker/build-push-action@v7.3.0
+        uses: docker/build-push-action@v7.4.0
         with:
           context: airgap/tile-generator
           file: airgap/tile-generator/Dockerfile
@@ -189,7 +189,7 @@ jobs:
             org.opencontainers.image.title=overture-tiles-airgap
 
       - name: Build PMTiles proxy image
-        uses: docker/build-push-action@v7.3.0
+        uses: docker/build-push-action@v7.4.0
         with:
           context: airgap/pmtiles-proxy
           file: airgap/pmtiles-proxy/Dockerfile
