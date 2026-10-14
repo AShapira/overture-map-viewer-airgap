@@ -31,7 +31,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7.0.0
+        uses: actions/setup-node@v7.1.0
         with:
           node-version-file: package.json
           cache: npm
@@ -201,7 +201,7 @@ jobs:
             org.opencontainers.image.title=overture-pmtiles-proxy-airgap
 
       - name: Set up Node for private S3 acceptance
-        uses: actions/setup-node@v7.0.0
+        uses: actions/setup-node@v7.1.0
         with:
           node-version-file: package.json
 
@@ -293,7 +293,7 @@ jobs:
           output-file: sbom-tiles.spdx.json
 
       - name: Upload SBOM artifacts
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: sboms
           path: |
