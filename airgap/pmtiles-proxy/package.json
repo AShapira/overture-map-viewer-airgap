@@ -11,7 +11,7 @@
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "3.1127.0",
+    "@aws-sdk/client-s3": "3.1152.0",
     "@smithy/node-http-handler": "4.12.1"
   }
 }
